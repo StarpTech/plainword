@@ -177,6 +177,10 @@ enum AccessibilityElementReader {
         (value as? NSNumber)?.boolValue ?? false
     }
 
+    static func integerValue(_ value: Any?) -> Int? {
+        (value as? NSNumber)?.intValue
+    }
+
     static func axValue(_ value: Any?) -> AXValue? {
         guard let value else { return nil }
         let cfValue = value as CFTypeRef

@@ -347,11 +347,20 @@ final class AccessibilityTextClient {
         from element: AXUIElement,
         scope: TextEditExtractionScope
     ) -> CapturedTextState? {
-        guard let selectedRange = rangeAttribute(
-            kAXSelectedTextRangeAttribute,
-            from: element
-        ), selectedRange.location >= 0, selectedRange.length >= 0 else {
+        guard let selectedRange = selectedRange(of: element),
+              selectedRange.location >= 0, selectedRange.length >= 0 else {
             return nil
+        }
+
+        // A field drawing its placeholder holds nothing, whatever its own reported
+        // value and offsets claim, so it is captured as the empty document it is.
+        if isShowingPlaceholder(element) {
+            return validatedTextState(CapturedTextState(
+                text: "",
+                range: NSRange(location: 0, length: 0),
+                documentUTF16Length: 0,
+                selectedRange: CFRange(location: 0, length: 0)
+            ), from: element)
         }
 
         let reportedLength = integerAttribute(
@@ -423,10 +432,8 @@ final class AccessibilityTextClient {
         _ state: CapturedTextState,
         from element: AXUIElement
     ) -> CapturedTextState? {
-        guard let confirmedRange = rangeAttribute(
-            kAXSelectedTextRangeAttribute,
-            from: element
-        ), confirmedRange.location == state.selectedRange.location,
+        guard let confirmedRange = selectedRange(of: element),
+              confirmedRange.location == state.selectedRange.location,
         confirmedRange.length == state.selectedRange.length,
         documentLength(of: element) == state.documentUTF16Length else {
             return nil
@@ -449,10 +456,8 @@ final class AccessibilityTextClient {
     func snapshotState(_ snapshot: FocusedTextSnapshot) -> AccessibilitySnapshotState {
         guard let currentLength = documentLength(of: snapshot.element),
               currentLength == snapshot.documentUTF16Length,
-              let currentSelection = rangeAttribute(
-                kAXSelectedTextRangeAttribute,
-                from: snapshot.element
-              ), currentSelection.location == snapshot.selectedRange.location,
+              let currentSelection = selectedRange(of: snapshot.element),
+              currentSelection.location == snapshot.selectedRange.location,
               currentSelection.length == snapshot.selectedRange.length,
               let currentText = capturedText(
                 in: snapshot.capturedTextRange,
@@ -776,10 +781,8 @@ final class AccessibilityTextClient {
 
         for attempt in 0..<8 {
             try Task.checkCancellation()
-            if let selectedRange = rangeAttribute(
-                kAXSelectedTextRangeAttribute,
-                from: element
-            ), selectedRange.location == range.location,
+            if let selectedRange = selectedRange(of: element),
+               selectedRange.location == range.location,
                selectedRange.length == range.length,
                (stringAttribute(kAXSelectedTextAttribute, from: element) ?? "") == originalText {
                 return true
@@ -900,8 +903,49 @@ final class AccessibilityTextClient {
     }
 
     private func documentLength(of element: AXUIElement) -> Int? {
-        integerAttribute(kAXNumberOfCharactersAttribute, from: element)
+        if isShowingPlaceholder(element) { return 0 }
+        return integerAttribute(kAXNumberOfCharactersAttribute, from: element)
             ?? stringAttribute(kAXValueAttribute, from: element).map { ($0 as NSString).length }
+    }
+
+    private func selectedRange(of element: AXUIElement) -> CFRange? {
+        if isShowingPlaceholder(element) { return CFRange(location: 0, length: 0) }
+        return rangeAttribute(kAXSelectedTextRangeAttribute, from: element)
+    }
+
+    /// Reports whether an element is drawing its placeholder in place of a value.
+    ///
+    /// Chromium folds the generated content of an empty `contenteditable` into the
+    /// accessible text: `AXValue` answers with the placeholder, `AXNumberOfCharacters`
+    /// agrees, and the caret is reported at the end of it. None of that is text the user
+    /// wrote, so every read above treats such a field as empty. Correcting it would
+    /// otherwise propose a rewrite of a prompt nobody typed, and writing into it would
+    /// start from the placeholder's offsets rather than from an empty document.
+    private func isShowingPlaceholder(_ element: AXUIElement) -> Bool {
+        let metadata = multipleAttributeValues(
+            [
+                kAXPlaceholderValueAttribute as String,
+                kAXNumberOfCharactersAttribute as String
+            ],
+            from: element
+        )
+        guard let placeholder = stringValue(metadata[kAXPlaceholderValueAttribute as String])?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !placeholder.isEmpty else {
+            return false
+        }
+        // An echo is the placeholder itself, give or take the trailing newline Chromium
+        // reports for an empty paragraph. A longer field is holding text, and reading
+        // that text back to compare it would cost a round trip for nothing.
+        if let characterCount = integerValue(metadata[kAXNumberOfCharactersAttribute as String]),
+           characterCount > (placeholder as NSString).length + 2 {
+            return false
+        }
+        guard let value = stringAttribute(kAXValueAttribute, from: element)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return false
+        }
+        return value == placeholder
     }
 
     /// Used only after Plainword has deliberately changed the source selection while
@@ -1036,6 +1080,10 @@ final class AccessibilityTextClient {
 
     private func boolValue(_ value: Any?) -> Bool {
         AccessibilityElementReader.boolValue(value)
+    }
+
+    private func integerValue(_ value: Any?) -> Int? {
+        AccessibilityElementReader.integerValue(value)
     }
 
     private func axValue(_ value: Any?) -> AXValue? {
