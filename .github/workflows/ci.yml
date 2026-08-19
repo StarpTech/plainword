@@ -1,0 +1,36 @@
+name: macOS CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install project generator
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate --spec project.yml
+
+      - name: Test shared core
+        run: swift test
+
+      - name: Build macOS app
+        run: |
+          xcodebuild \
+            -project Plainword.xcodeproj \
+            -scheme Plainword \
+            -configuration Debug \
+            -destination 'generic/platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            build

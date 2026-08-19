@@ -1,0 +1,99 @@
+name: Unsigned macOS Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish DMG
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tags must look like v1.2.3 or v1.2.3-beta.1"
+            exit 1
+          fi
+          echo "RELEASE_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Install project generator
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate --spec project.yml
+
+      - name: Test shared core
+        run: swift test
+
+      - name: Build universal Release app
+        run: |
+          xcodebuild \
+            -project Plainword.xcodeproj \
+            -scheme Plainword \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath .build/release \
+            ARCHS='arm64 x86_64' \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            MARKETING_VERSION="$RELEASE_VERSION" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            build
+
+      - name: Verify architectures
+        run: |
+          executable='.build/release/Build/Products/Release/Plainword.app/Contents/MacOS/Plainword'
+          architectures="$(lipo -archs "$executable")"
+          echo "Plainword architectures: $architectures"
+          [[ " $architectures " == *" arm64 "* ]]
+          [[ " $architectures " == *" x86_64 "* ]]
+
+      - name: Package unsigned DMG
+        run: |
+          app='.build/release/Build/Products/Release/Plainword.app'
+          package_root='.build/dmg-root'
+          dmg="dist/Plainword-${RELEASE_VERSION}-unsigned.dmg"
+
+          mkdir -p "$package_root" dist
+          ditto "$app" "$package_root/Plainword.app"
+          ln -s /Applications "$package_root/Applications"
+          hdiutil create \
+            -volname Plainword \
+            -srcfolder "$package_root" \
+            -format UDZO \
+            -ov \
+            "$dmg"
+          hdiutil verify "$dmg"
+
+          cd dist
+          shasum -a 256 "$(basename "$dmg")" > "$(basename "$dmg").sha256"
+
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dmg="dist/Plainword-${RELEASE_VERSION}-unsigned.dmg"
+          gh release create "$GITHUB_REF_NAME" \
+            "$dmg#Plainword ${RELEASE_VERSION} unsigned DMG" \
+            "$dmg.sha256#SHA-256 checksum" \
+            --verify-tag \
+            --prerelease \
+            --title "Plainword ${RELEASE_VERSION} (unsigned preview)" \
+            --notes "Unsigned preview build. macOS cannot verify its developer yet, so Gatekeeper may block it. Download only if you trust this repository. Developer ID signing and Apple notarization will be added before stable distribution." \
+            --generate-notes
