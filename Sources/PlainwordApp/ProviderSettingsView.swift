@@ -82,7 +82,7 @@ struct ProviderSettingsView: View {
                         detail: "Set reasoning effort for models that support thinking."
                     ) {
                         Picker("Thinking mode", selection: $settings.thinkingMode) {
-                            ForEach(ThinkingMode.allCases) { mode in
+                            ForEach(availableThinkingModes) { mode in
                                 Text(mode.displayName).tag(mode)
                             }
                         }
@@ -247,12 +247,17 @@ struct ProviderSettingsView: View {
 
             fieldRow(
                 "Model",
-                detail: "Codex default follows your CLI configuration."
+                detail: codexModelDetail
             ) {
                 Picker("Model", selection: $settings.codexModel) {
                     Text("Codex default").tag("")
                     ForEach(settings.codexModelOptions) { model in
-                        Text(model.displayName).tag(model.id)
+                        Text(
+                            model.isLatencyOptimized
+                                ? "\(model.displayName) (Fastest)"
+                                : model.displayName
+                        )
+                        .tag(model.id)
                     }
                 }
                 .labelsHidden()
@@ -262,6 +267,19 @@ struct ProviderSettingsView: View {
                 .disabled(settings.codexState == .loading)
             }
         }
+    }
+
+    private var availableThinkingModes: [ThinkingMode] {
+        settings.provider == .codex
+            ? ThinkingMode.allCases.filter { $0 != .off }
+            : ThinkingMode.allCases
+    }
+
+    private var codexModelDetail: String {
+        if settings.codexModel == CodexModel.latencyOptimizedModelID {
+            return "Optimized for low-latency corrections."
+        }
+        return "Codex-Spark is recommended for responsive corrections."
     }
 
     private var credentialCard: some View {

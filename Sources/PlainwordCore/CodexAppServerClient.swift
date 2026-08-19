@@ -40,6 +40,8 @@ public enum CodexAppServerClientError: Error, LocalizedError, Equatable, Sendabl
 }
 
 public struct CodexModel: Identifiable, Equatable, Sendable {
+    public static let latencyOptimizedModelID = "gpt-5.3-codex-spark"
+
     public let id: String
     public let displayName: String
     public let isDefault: Bool
@@ -48,6 +50,10 @@ public struct CodexModel: Identifiable, Equatable, Sendable {
         self.id = id
         self.displayName = displayName
         self.isDefault = isDefault
+    }
+
+    public var isLatencyOptimized: Bool {
+        id == Self.latencyOptimizedModelID
     }
 }
 
@@ -207,6 +213,28 @@ private final class RunningCodexProcess: @unchecked Sendable {
 }
 
 public actor CodexAppServerClient {
+    // Plainword only needs structured text generation. Turning off Codex's
+    // agent capabilities keeps their tool schemas and instructions out of
+    // every ephemeral editing thread.
+    private static let disabledAgentFeatures = [
+        "apps",
+        "browser_use",
+        "computer_use",
+        "goals",
+        "hooks",
+        "image_generation",
+        "in_app_browser",
+        "mentions_v2",
+        "multi_agent",
+        "plugins",
+        "shell_tool",
+        "skill_search",
+        "tool_suggest",
+        "unified_exec",
+        "view_image",
+        "workspace_dependencies"
+    ]
+
     private struct PendingRequest {
         let continuation: CheckedContinuation<CodexJSONValue, Error>
     }
@@ -350,9 +378,7 @@ public actor CodexAppServerClient {
             startedAt: Date(),
             endpoint: "codex app-server (local stdio)",
             model: model.isEmpty ? "Codex default" : model,
-            reasoningEffort: settings.thinkingMode == .off
-                ? "default"
-                : settings.thinkingMode.rawValue,
+            reasoningEffort: Self.reasoningEffort(for: settings.thinkingMode),
             isStreaming: true,
             messages: messages.map { .init(role: $0.role, content: $0.content) },
             payloadJSON: Self.prettyJSON(.object([
@@ -362,9 +388,9 @@ public actor CodexAppServerClient {
         )
         await debugHandler?(.started(debugRequest))
 
-        var lastError: Error?
         do {
-            for attempt in 0...1 {
+            var attempt = 0
+            while true {
                 do {
                     let result = try await performTurn(
                         systemPrompt: messages[0].content,
@@ -390,14 +416,13 @@ public actor CodexAppServerClient {
                     )
                     return correction
                 } catch {
-                    lastError = error
-                    guard attempt == 0, Self.shouldRestart(after: error) else {
+                    guard attempt == 0, Self.shouldResetProcess(after: error) else {
                         throw error
                     }
+                    attempt += 1
                     stopProcess()
                 }
             }
-            throw lastError ?? CodexAppServerClientError.invalidResponse
         } catch {
             await debugHandler?(
                 .failed(
@@ -462,7 +487,14 @@ public actor CodexAppServerClient {
             "cwd": .string(FileManager.default.temporaryDirectory.path),
             "approvalPolicy": .string("never"),
             "sandbox": .string("read-only"),
-            "ephemeral": .bool(true)
+            "ephemeral": .bool(true),
+            "config": .object([
+                "features": .object(
+                    Dictionary(
+                        uniqueKeysWithValues: disabledAgentFeatures.map { ($0, .bool(false)) }
+                    )
+                )
+            ])
         ]
         if !model.isEmpty {
             values["model"] = .string(model)
@@ -507,10 +539,14 @@ public actor CodexAppServerClient {
                 "additionalProperties": .bool(false)
             ])
         ]
-        if thinkingMode != .off {
-            values["effort"] = .string(thinkingMode.rawValue)
-        }
+        values["effort"] = .string(reasoningEffort(for: thinkingMode))
         return .object(values)
+    }
+
+    static func reasoningEffort(for thinkingMode: ThinkingMode) -> String {
+        // Codex models do not advertise a no-reasoning effort. Omitting the
+        // value would inherit the CLI configuration, which may be much higher.
+        thinkingMode == .off ? ThinkingMode.low.rawValue : thinkingMode.rawValue
     }
 
     private func performTurn(
@@ -975,10 +1011,10 @@ public actor CodexAppServerClient {
         )
     }
 
-    private static func shouldRestart(after error: Error) -> Bool {
+    static func shouldResetProcess(after error: Error) -> Bool {
         guard let error = error as? CodexAppServerClientError else { return false }
         return switch error {
-        case .processExited, .requestTimedOut, .invalidResponse:
+        case .processExited, .invalidResponse:
             true
         default:
             false

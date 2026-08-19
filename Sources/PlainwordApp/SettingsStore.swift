@@ -82,6 +82,9 @@ final class SettingsStore: ObservableObject {
 
     @Published var provider: LLMProvider {
         didSet {
+            if provider == .codex, thinkingMode == .off {
+                thinkingMode = .low
+            }
             persistLLMSettings()
             if provider == .codex {
                 Task { await loadCodexStatusIfNeeded() }
@@ -195,7 +198,13 @@ final class SettingsStore: ObservableObject {
         codexModel = storedSettings.codexModel
         authentication = storedSettings.authentication
         customHeaderName = storedSettings.customHeaderName
-        thinkingMode = storedSettings.thinkingMode
+        let normalizedThinkingMode: ThinkingMode
+        if storedSettings.provider == .codex, storedSettings.thinkingMode == .off {
+            normalizedThinkingMode = .low
+        } else {
+            normalizedThinkingMode = storedSettings.thinkingMode
+        }
+        thinkingMode = normalizedThinkingMode
         do {
             let storedKey = try apiKeyStore.read() ?? ""
             apiKey = storedKey
@@ -203,6 +212,9 @@ final class SettingsStore: ObservableObject {
         } catch {
             apiKey = ""
             credentialState = .failure(error.localizedDescription)
+        }
+        if normalizedThinkingMode != storedSettings.thinkingMode {
+            persistLLMSettings()
         }
         if provider == .codex {
             Task { [weak self] in
@@ -310,13 +322,18 @@ final class SettingsStore: ObservableObject {
     }
 
     var codexModelOptions: [CodexModel] {
-        guard case .ready(let status) = codexState else { return [] }
         let selected = codexModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !selected.isEmpty, !status.models.contains(where: { $0.id == selected }) else {
-            return status.models
+        guard case .ready(let status) = codexState else {
+            guard !selected.isEmpty else { return [] }
+            return [CodexModel(id: selected, displayName: selected, isDefault: false)]
+        }
+        let models = status.models.filter(\.isLatencyOptimized)
+            + status.models.filter { !$0.isLatencyOptimized }
+        guard !selected.isEmpty, !models.contains(where: { $0.id == selected }) else {
+            return models
         }
         return [CodexModel(id: selected, displayName: selected, isDefault: false)]
-            + status.models
+            + models
     }
 
     func saveAPIKey() {

@@ -93,10 +93,54 @@ final class CodexAppServerClientTests: XCTestCase {
         XCTAssertEqual(thread["sandbox"], .string("read-only"))
         XCTAssertEqual(thread["approvalPolicy"], .string("never"))
         XCTAssertEqual(thread["model"], .string("test-model"))
+        XCTAssertEqual(thread["config"]?["features"]?["apps"], .bool(false))
+        XCTAssertEqual(thread["config"]?["features"]?["multi_agent"], .bool(false))
+        XCTAssertEqual(thread["config"]?["features"]?["shell_tool"], .bool(false))
         XCTAssertEqual(turn["effort"], .string("low"))
         XCTAssertEqual(
             turn["outputSchema"]?["properties"]?["classification"]?["enum"],
             .array([.string("correction"), .string("rewrite")])
+        )
+    }
+
+    func testOffThinkingModeUsesLowEffortInsteadOfCLIConfiguration() {
+        let turn = CodexAppServerClient.turnParameters(
+            threadID: "thread-1",
+            userPrompt: "Fix this.",
+            intent: .correct,
+            thinkingMode: .off
+        )
+
+        XCTAssertEqual(turn["effort"], .string("low"))
+        XCTAssertEqual(CodexAppServerClient.reasoningEffort(for: .off), "low")
+    }
+
+    func testIdentifiesLatencyOptimizedModel() {
+        let spark = CodexModel(
+            id: CodexModel.latencyOptimizedModelID,
+            displayName: "Codex Spark",
+            isDefault: false
+        )
+        let other = CodexModel(
+            id: "other-model",
+            displayName: "Other",
+            isDefault: true
+        )
+
+        XCTAssertTrue(spark.isLatencyOptimized)
+        XCTAssertFalse(other.isLatencyOptimized)
+    }
+
+    func testTimeoutDoesNotResetAndRetryTheProcess() {
+        XCTAssertFalse(
+            CodexAppServerClient.shouldResetProcess(
+                after: CodexAppServerClientError.requestTimedOut
+            )
+        )
+        XCTAssertTrue(
+            CodexAppServerClient.shouldResetProcess(
+                after: CodexAppServerClientError.processExited(status: 1, details: nil)
+            )
         )
     }
 

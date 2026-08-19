@@ -367,9 +367,11 @@ final class CorrectionPanelController {
             defer: true
         )
         panel.isFloatingPanel = true
-        // Keep the proposal in the source app's ordinary window layer so it cannot
-        // float above an unrelated app after focus changes.
-        panel.level = .normal
+        // The source application remains active while this nonactivating panel is
+        // visible. Keep the proposal above that application's windows even when a
+        // click causes it to reorder its own normal-level windows. The cross-app
+        // controller suspends the panel when another app takes over this display.
+        panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -1042,6 +1044,34 @@ private final class CorrectionPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+private struct PlainwordLoadingSpinner: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isRotating = false
+
+    var body: some View {
+        Circle()
+            .trim(from: 0.12, to: 0.82)
+            .stroke(
+                colorScheme == .dark ? Color.white : Color.black.opacity(0.82),
+                style: StrokeStyle(lineWidth: 2, lineCap: .round)
+            )
+            .rotationEffect(.degrees(isRotating ? 360 : 0))
+            .animation(
+                reduceMotion
+                    ? nil
+                    : .linear(duration: 0.72).repeatForever(autoreverses: false),
+                value: isRotating
+            )
+            .frame(width: 14, height: 14)
+            .onAppear { isRotating = !reduceMotion }
+            .onChange(of: reduceMotion) { _, shouldReduceMotion in
+                isRotating = !shouldReduceMotion
+            }
+            .accessibilityHidden(true)
+    }
+}
+
 private struct CrossAppProposalView: View {
     @ObservedObject var model: CorrectionPanelModel
     let onAccept: () -> Void
@@ -1090,12 +1120,13 @@ private struct CrossAppProposalView: View {
 
     private var promptTrigger: some View {
         ZStack(alignment: model.pointerEdge == .top ? .top : .bottom) {
-            Button(action: onRequestPrompt) {
+            Button {
+                guard model.phase != .promptTriggerLoading else { return }
+                onRequestPrompt()
+            } label: {
                 Group {
                     if model.phase == .promptTriggerLoading {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(PlainwordTheme.accent)
+                        PlainwordLoadingSpinner()
                     } else {
                         PlainwordBrandMark(size: 24)
                     }
@@ -1109,7 +1140,7 @@ private struct CrossAppProposalView: View {
                     }
             }
             .buttonStyle(.plain)
-            .disabled(model.phase == .promptTriggerLoading)
+            .allowsHitTesting(model.phase != .promptTriggerLoading)
             .help(model.phase == .promptTriggerLoading ? "Reviewing text" : "Review text")
             .accessibilityLabel(
                 model.phase == .promptTriggerLoading ? "Reviewing text" : "Review text"
@@ -1192,9 +1223,7 @@ private struct CrossAppProposalView: View {
 
             HStack(spacing: 8) {
                 if model.isWorking {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(PlainwordTheme.accent)
+                    PlainwordLoadingSpinner()
                         .frame(width: 21, height: 21)
                 } else {
                     PlainwordBrandMark(size: 21)

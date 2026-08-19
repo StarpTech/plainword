@@ -30,9 +30,10 @@ final class SourceSuggestionOverlayController {
             backing: .buffered,
             defer: true
         )
-        // Match ordinary application windows so marks cannot float above an
-        // unrelated app after focus leaves the editor that owns the suggestion.
-        panel.level = .normal
+        // Match the proposal's floating layer so source marks stay visible when the
+        // active editor reorders its normal-level windows. The cross-app controller
+        // removes this overlay whenever the proposal is suspended.
+        panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -75,7 +76,7 @@ final class SourceSuggestionOverlayController {
         // a deferred borderless panel to resize its content view on first show.
         overlayView.frame = CGRect(origin: .zero, size: globalFrame.size)
         overlayView.needsDisplay = true
-        // The source marks and proposal are separate normal-level windows. Order
+        // The source marks and proposal are separate same-level windows. Order
         // the marks relative to the proposal so geometry refreshes cannot put an
         // underline or highlight over the proposal surface.
         panel.order(.below, relativeTo: windowNumber)
