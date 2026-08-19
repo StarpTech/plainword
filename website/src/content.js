@@ -1,7 +1,7 @@
 /** Central place for copy, links and data used across sections. */
 
 export const DOWNLOAD_URL =
-  'https://github.com/StarpTech/plainword/releases/download/v1.0.0-beta.2/Plainword-1.0.0-beta.2-unsigned.dmg';
+  'https://github.com/StarpTech/plainword/releases/download/v1.0.0-beta.3/Plainword-1.0.0-beta.3-unsigned.dmg';
 export const GITHUB_URL = 'https://github.com/StarpTech/plainword';
 
 export const HERO_POPOVERS = [
