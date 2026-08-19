@@ -273,12 +273,27 @@ public enum WritingSuggestionPlanner {
         originalText: String,
         replacementText: String
     ) -> Bool {
-        let originalDetails = concreteDetails(in: originalText)
-        let replacementDetails = concreteDetails(in: replacementText)
+        // The two sides are read differently on purpose. The author's own date may be
+        // misspelled, so the original is matched loosely and "tommorow" still counts as
+        // a date it already holds. A date the model invents is spelled correctly, so the
+        // replacement is matched exactly: matching it loosely too would read an ordinary
+        // corrected word as a date and veto the correction, which is how "just" — two
+        // letters from "july" — used to be discarded.
+        let originalDetails = concreteDetails(
+            in: originalText,
+            matchingCalendarWordsLoosely: true
+        )
+        let replacementDetails = concreteDetails(
+            in: replacementText,
+            matchingCalendarWordsLoosely: false
+        )
         return !replacementDetails.isSubset(of: originalDetails)
     }
 
-    private static func concreteDetails(in text: String) -> Set<String> {
+    private static func concreteDetails(
+        in text: String,
+        matchingCalendarWordsLoosely: Bool
+    ) -> Set<String> {
         let calendarWords: Set<String> = [
             "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
             "january", "february", "march", "april", "june", "july", "august",
@@ -291,7 +306,9 @@ public enum WritingSuggestionPlanner {
                 return "number:\(normalized)"
             }
             if let calendarWord = calendarWords.first(where: {
-                isSameOrLikelyMisspelling(normalized, of: $0)
+                matchingCalendarWordsLoosely
+                    ? isSameOrLikelyMisspelling(normalized, of: $0)
+                    : normalized == $0
             }) {
                 return "calendar:\(calendarWord)"
             }

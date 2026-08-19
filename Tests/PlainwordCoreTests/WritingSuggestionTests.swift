@@ -185,6 +185,33 @@ final class WritingSuggestionTests: XCTestCase {
         )
     }
 
+    func testKeepsCorrectionThatResemblesACalendarWord() throws {
+        let suggestion = try XCTUnwrap(
+            WritingSuggestionPlanner.make(
+                originalText: "I agree, jsut want to avoid further pain",
+                replacementText: "I agree, just want to avoid further pain",
+                classifiedAs: .correction
+            )
+        )
+
+        XCTAssertEqual(
+            suggestion.changes,
+            [WritingTextChange(original: "jsut", replacement: "just")]
+        )
+    }
+
+    func testKeepsCorrectionOfAMisspelledCalendarWord() throws {
+        let suggestion = try XCTUnwrap(
+            WritingSuggestionPlanner.make(
+                originalText: "Lets meet on tuesady.",
+                replacementText: "Let's meet on Tuesday.",
+                classifiedAs: .correction
+            )
+        )
+
+        XCTAssertEqual(suggestion.replacementText, "Let's meet on Tuesday.")
+    }
+
     func testCustomEditMayApplyExplicitConcreteDetail() throws {
         let suggestion = try XCTUnwrap(
             WritingSuggestionPlanner.make(
