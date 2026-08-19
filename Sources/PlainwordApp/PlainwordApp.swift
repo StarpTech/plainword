@@ -218,9 +218,8 @@ private final class StatusBarController: NSObject, ObservableObject {
 
     private func configureStatusItem() {
         guard let button = statusItem.button else { return }
-        button.image = PlainwordBrand.icon(size: 18)
+        button.image = PlainwordMenuBarGlyph.image()
         button.imageScaling = .scaleProportionallyDown
-        button.image?.accessibilityDescription = "Plainword"
         button.toolTip = "Plainword"
         button.target = self
         button.action = #selector(handleStatusItemClick)
@@ -332,7 +331,7 @@ private final class StatusBarController: NSObject, ObservableObject {
             action: #selector(toggleSuggestionsFromContextMenu),
             keyEquivalent: ""
         )
-        suggestionsItem.image = PlainwordBrand.icon(size: 16)
+        suggestionsItem.image = PlainwordMenuBarGlyph.image(size: 16)
         suggestionsItem.state = crossAppCorrections.isListeningEnabled ? .on : .off
         suggestionsItem.target = self
         menu.addItem(suggestionsItem)

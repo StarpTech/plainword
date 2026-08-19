@@ -20,6 +20,51 @@ final class WritingSuggestionTests: XCTestCase {
         )
     }
 
+    func testComposedDraftIsAWholeInsertion() throws {
+        let suggestion = try XCTUnwrap(
+            WritingSuggestionPlanner.makeComposition(
+                "  Running about ten minutes late, sorry.  "
+            )
+        )
+
+        XCTAssertEqual(suggestion.kind, .composition)
+        XCTAssertEqual(suggestion.originalText, "")
+        XCTAssertEqual(
+            suggestion.replacementText,
+            "Running about ten minutes late, sorry."
+        )
+        XCTAssertEqual(
+            suggestion.changes,
+            [
+                WritingTextChange(
+                    original: "",
+                    replacement: "Running about ten minutes late, sorry."
+                )
+            ]
+        )
+    }
+
+    func testComposedDraftNeedsSomethingToInsert() {
+        XCTAssertNil(WritingSuggestionPlanner.makeComposition("   \n "))
+        XCTAssertNil(WritingSuggestionPlanner.makeComposition(""))
+    }
+
+    func testComposedDraftKeepsDetailAndLanguageAnEditWouldRefuse() throws {
+        // `make` rejects both of these on an edit, where they would mean the model
+        // invented facts or switched language. Writing new text is where they belong.
+        let suggestion = try XCTUnwrap(
+            WritingSuggestionPlanner.makeComposition("Bin zehn Minuten später da, ab 14:30.")
+        )
+
+        XCTAssertEqual(suggestion.kind, .composition)
+        XCTAssertNil(
+            WritingSuggestionPlanner.make(
+                originalText: "",
+                replacementText: "Bin zehn Minuten später da, ab 14:30."
+            )
+        )
+    }
+
     func testClassifiesShortAppendOnlySuggestionAsCompletion() throws {
         let suggestion = try XCTUnwrap(
             WritingSuggestionPlanner.make(

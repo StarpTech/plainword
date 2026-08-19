@@ -436,6 +436,28 @@ struct StatusPill: View {
     }
 }
 
+/// A button label that carries its own keyboard shortcut, so a panel does not
+/// need a separate hint line explaining which key triggers which button.
+struct PlainwordShortcutLabel: View {
+    let title: String
+    let shortcut: String
+
+    init(_ title: String, shortcut: String) {
+        self.title = title
+        self.shortcut = shortcut
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title)
+            Text(shortcut)
+                .font(.system(size: 11, weight: .medium))
+                .opacity(0.55)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
 struct PlainwordButtonStyle: ButtonStyle {
     enum Emphasis {
         case primary

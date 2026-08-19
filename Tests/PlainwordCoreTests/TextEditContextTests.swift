@@ -16,6 +16,51 @@ final class TextEditContextTests: XCTestCase {
         XCTAssertEqual(context?.trailingContext, "paragraph.")
     }
 
+    func testEmptyFieldYieldsAZeroLengthTargetAtTheCaret() throws {
+        let context = try XCTUnwrap(
+            TextEditContextExtractor.insertionPoint(in: "", at: 0)
+        )
+
+        XCTAssertEqual(context.text, "")
+        XCTAssertEqual(context.utf16Location, 0)
+        XCTAssertEqual(context.utf16Length, 0)
+        XCTAssertEqual(context.targetKind, .insertionPoint)
+        // Nothing is being edited, so there is no surrounding sentence to send either.
+        XCTAssertEqual(context.leadingContext, "")
+        XCTAssertEqual(context.trailingContext, "")
+        XCTAssertFalse(context.completionIsAllowed)
+    }
+
+    func testInsertionPointRefusesAFieldThatAlreadyHasText() {
+        XCTAssertNil(TextEditContextExtractor.insertionPoint(in: "Already here.", at: 0))
+        XCTAssertNil(TextEditContextExtractor.insertionPoint(in: "", at: 1))
+        XCTAssertNil(TextEditContextExtractor.insertionPoint(in: "  ", at: -1))
+    }
+
+    func testInsertionPointAcceptsAFieldHoldingOnlyWhitespace() throws {
+        let context = try XCTUnwrap(
+            TextEditContextExtractor.insertionPoint(in: "\n  ", at: 3)
+        )
+
+        XCTAssertEqual(context.utf16Location, 3)
+        XCTAssertEqual(context.utf16Length, 0)
+    }
+
+    func testWritingIntoAnEmptyFieldInsertsAtTheCaret() throws {
+        let context = try XCTUnwrap(
+            TextEditContextExtractor.insertionPoint(in: "", at: 0)
+        )
+
+        XCTAssertEqual(
+            TextEditContextExtractor.replacing(
+                context: context,
+                in: "",
+                with: "Running ten minutes late."
+            ),
+            "Running ten minutes late."
+        )
+    }
+
     func testTranslatesWindowRelativeContextToDocumentOffsets() throws {
         let context = TextEditContext(
             text: "paragraph",

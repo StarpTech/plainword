@@ -5,23 +5,25 @@ import Features from './components/Features.jsx';
 import VoiceSection from './components/VoiceSection.jsx';
 import ContextSection from './components/ContextSection.jsx';
 import Providers from './components/Providers.jsx';
+import RecommendedModel from './components/RecommendedModel.jsx';
 import DownloadCta from './components/DownloadCta.jsx';
 import Footer from './components/Footer.jsx';
 
 export default function App() {
   return (
-    <div className="relative min-h-screen overflow-hidden bg-canvas">
+    <div className="relative min-h-screen overflow-x-clip bg-canvas">
       <Backdrop />
-      <div className="relative mx-auto max-w-[1040px] px-5 sm:px-8">
-        <Nav />
+      <Nav />
+      <main className="relative">
         <Hero />
         <Features />
         <VoiceSection />
         <ContextSection />
         <Providers />
+        <RecommendedModel />
         <DownloadCta />
-        <Footer />
-      </div>
+      </main>
+      <Footer />
     </div>
   );
 }

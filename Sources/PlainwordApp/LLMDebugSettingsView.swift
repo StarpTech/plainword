@@ -1,9 +1,25 @@
-import AppKit
 import PlainwordCore
 import SwiftUI
 
 struct LLMDebugSettingsView: View {
     @ObservedObject var logStore: LLMDebugLogStore
+
+    private enum Scope: String, CaseIterable, Identifiable {
+        case all
+        case failures
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .all: "All"
+            case .failures: "Failures"
+            }
+        }
+    }
+
+    @State private var scope: Scope = .all
+    @State private var inspectedCallID: UUID?
 
     var body: some View {
         SettingsPage {
@@ -13,78 +29,107 @@ struct LLMDebugSettingsView: View {
                 icon: "ladybug"
             )
 
-            privacyNotice
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    SettingsSectionLabel("LLM calls")
-                    Spacer()
-                    Text(callCountLabel)
-                        .font(.caption)
-                        .foregroundStyle(PlainwordTheme.textSecondary)
-                    Button("Clear") {
-                        logStore.clear()
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(PlainwordTheme.accent)
-                    .disabled(logStore.entries.isEmpty)
-                }
+            VStack(alignment: .leading, spacing: 10) {
+                listHeader
+                privacyNotice
 
                 if logStore.entries.isEmpty {
-                    emptyState
+                    emptyState(
+                        icon: "text.magnifyingglass",
+                        title: "No LLM calls yet",
+                        message: "Review or transform some text, or test your provider connection."
+                    )
+                } else if visibleEntries.isEmpty {
+                    emptyState(
+                        icon: "checkmark.circle",
+                        title: "No failed calls",
+                        message: "Every recorded call came back successfully."
+                    )
                 } else {
-                    // Debug rows can grow substantially when their payloads are expanded.
-                    // Keeping their layout alive prevents LazyVStack from changing its
-                    // height estimate mid-scroll and making the scroll position jump.
-                    VStack(spacing: 10) {
-                        ForEach(logStore.entries) { entry in
-                            LLMCallDebugView(entry: entry)
+                    // Rows are a fixed height now that payloads open in a sheet, so the
+                    // list can stay lazy without the scroll position jumping around.
+                    LazyVStack(spacing: 9) {
+                        ForEach(visibleEntries) { entry in
+                            LLMCallRow(entry: entry) {
+                                inspectedCallID = entry.id
+                            }
                         }
                     }
                 }
             }
         }
         .navigationTitle("Debug")
-    }
-
-    private var privacyNotice: some View {
-        HStack(alignment: .top, spacing: 11) {
-            Image(systemName: "memorychip")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(PlainwordTheme.accent)
-                .frame(width: 28, height: 28)
-                .background(
-                    PlainwordTheme.accent.opacity(0.09),
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                )
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Stored in memory for this session")
-                    .font(.system(size: 13, weight: .medium))
-                Text(
-                    "The newest 100 calls are kept until Plainword quits or you clear them. "
-                        + "API keys and authentication headers are never recorded. Endpoint "
-                        + "query values are redacted. Prompts may contain your writing and "
-                        + "visible application context."
-                )
-                .font(.caption)
-                .foregroundStyle(PlainwordTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+        .sheet(isPresented: isInspecting) {
+            if let entry = inspectedCall {
+                LLMCallDetailView(entry: entry) {
+                    inspectedCallID = nil
+                }
+            } else {
+                clearedCallNotice
             }
-            Spacer(minLength: 0)
         }
-        .padding(14)
-        .plainwordGlass(cornerRadius: PlainwordTheme.cornerRadius, shadow: true)
     }
 
-    private var emptyState: some View {
+    private var listHeader: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 10) {
+                SettingsSectionLabel("LLM calls")
+                Spacer()
+                Text(callCountLabel)
+                    .font(.caption)
+                    .foregroundStyle(PlainwordTheme.textSecondary)
+                Button("Clear") {
+                    logStore.clear()
+                    inspectedCallID = nil
+                }
+                .buttonStyle(PlainwordButtonStyle(.quiet))
+                .disabled(logStore.entries.isEmpty)
+                .help("Remove every recorded call from this session")
+            }
+
+            if !logStore.entries.isEmpty {
+                Picker("Show", selection: $scope) {
+                    ForEach(Scope.allCases) { scope in
+                        Text(scopeTitle(scope)).tag(scope)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 240, alignment: .leading)
+                .accessibilityLabel("Filter calls")
+            }
+        }
+    }
+
+    /// Deliberately a single quiet line: the reassurance matters, the detail does not
+    /// need to outweigh the calls it sits above. The rest lives in the tooltip.
+    private var privacyNotice: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "memorychip")
+                .font(.system(size: 10, weight: .medium))
+                .accessibilityHidden(true)
+            Text("Kept in memory for this session. API keys and auth headers are never recorded.")
+        }
+        .font(.caption)
+        .foregroundStyle(PlainwordTheme.textSecondary)
+        .help(
+            "The newest 100 calls are kept until Plainword quits or you clear them. "
+                + "API keys and authentication headers are never recorded. Endpoint "
+                + "query values are redacted. Prompts may contain your writing and "
+                + "visible application context."
+        )
+        .accessibilityElement(children: .combine)
+    }
+
+    private func emptyState(icon: String, title: String, message: String) -> some View {
         VStack(spacing: 8) {
-            Image(systemName: "text.magnifyingglass")
+            Image(systemName: icon)
                 .font(.system(size: 22))
                 .foregroundStyle(PlainwordTheme.textSecondary)
-            Text("No LLM calls yet")
+                .accessibilityHidden(true)
+            Text(title)
                 .font(.system(size: 14, weight: .medium))
-            Text("Review or transform some text, or test your provider connection.")
+            Text(message)
                 .font(.caption)
                 .foregroundStyle(PlainwordTheme.textSecondary)
                 .multilineTextAlignment(.center)
@@ -92,6 +137,49 @@ struct LLMDebugSettingsView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 34)
         .plainwordGlass(cornerRadius: PlainwordTheme.cardCornerRadius, shadow: true)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var clearedCallNotice: some View {
+        VStack(spacing: 12) {
+            Text("This call is no longer recorded.")
+                .font(.system(size: 13, weight: .medium))
+            Button("Done") { inspectedCallID = nil }
+                .buttonStyle(PlainwordButtonStyle(.secondary))
+                .keyboardShortcut(.cancelAction)
+        }
+        .padding(30)
+        .frame(minWidth: 320)
+        .background(PlainwordTheme.canvas)
+    }
+
+    private var visibleEntries: [LLMDebugLogEntry] {
+        switch scope {
+        case .all: logStore.entries
+        case .failures: logStore.entries.filter(\.isFailure)
+        }
+    }
+
+    private var inspectedCall: LLMDebugLogEntry? {
+        logStore.entries.first { $0.id == inspectedCallID }
+    }
+
+    private var isInspecting: Binding<Bool> {
+        Binding(
+            get: { inspectedCallID != nil },
+            set: { isPresented in
+                if !isPresented { inspectedCallID = nil }
+            }
+        )
+    }
+
+    private func scopeTitle(_ scope: Scope) -> String {
+        switch scope {
+        case .all:
+            "\(scope.title) (\(logStore.entries.count))"
+        case .failures:
+            "\(scope.title) (\(logStore.entries.filter(\.isFailure).count))"
+        }
     }
 
     private var callCountLabel: String {
@@ -99,272 +187,103 @@ struct LLMDebugSettingsView: View {
     }
 }
 
-private struct LLMCallDebugView: View {
+/// One call in the list: a whole-card button that opens the inspector.
+///
+/// The card is the target, rather than a disclosure triangle, so the click area matches
+/// what the row looks like and the row never grows to swallow the page.
+private struct LLMCallRow: View {
     let entry: LLMDebugLogEntry
+    let open: () -> Void
 
-    @State private var isExpanded = false
-    @State private var showsRawPayload = false
+    @State private var isHovering = false
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            VStack(alignment: .leading, spacing: 14) {
-                metadata
+        Button(action: open) {
+            HStack(alignment: .center, spacing: 11) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        LLMCallStatusBadge(entry: entry)
+                        Text(entry.request.model)
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text(entry.request.startedAt, format: .dateTime.hour().minute().second())
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(PlainwordTheme.textSecondary)
+                    }
 
-                ForEach(Array(entry.request.messages.enumerated()), id: \.offset) {
-                    _, message in
-                    debugTextBlock(
-                        title: message.role.capitalized + " message",
-                        text: message.content
-                    )
-                }
+                    if let subject = entry.subjectPreview {
+                        Text("\u{201C}" + subject + "\u{201D}")
+                            .font(.system(size: 12))
+                            .foregroundStyle(PlainwordTheme.textSecondary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
 
-                DisclosureGroup("Raw JSON payload", isExpanded: $showsRawPayload) {
-                    debugTextBlock(
-                        title: "Request payload",
-                        text: entry.request.payloadJSON
-                    )
-                    .padding(.top, 8)
-                }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(PlainwordTheme.textSecondary)
+                    if let failureMessage = entry.failureMessage {
+                        Text(failureMessage)
+                            .font(.caption)
+                            .foregroundStyle(PlainwordTheme.danger)
+                            .lineLimit(1)
+                    }
 
-                responseSection
-            }
-            .padding(.top, 14)
-        } label: {
-            callHeader
-        }
-        .padding(14)
-        .plainwordGlass(cornerRadius: PlainwordTheme.cardCornerRadius, shadow: true)
-    }
-
-    private var callHeader: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 8) {
-                statusBadge
-                Text(entry.request.model)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                Spacer()
-                Text(entry.request.startedAt, format: .dateTime.hour().minute().second())
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(PlainwordTheme.textSecondary)
-            }
-
-            HStack(spacing: 7) {
-                Text(entry.request.isStreaming ? "Streaming" : "Standard")
-                Text("·")
-                Text(entry.request.reasoningEffort.capitalized + " thinking")
-                if let duration = entry.duration {
-                    Text("·")
-                    Text(String(format: "%.2f s", duration))
-                }
-            }
-            .font(.caption)
-            .foregroundStyle(PlainwordTheme.textSecondary)
-        }
-        .contentShape(Rectangle())
-    }
-
-    private var metadata: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            metadataRow("Endpoint", value: entry.request.endpoint)
-            metadataRow("Model", value: entry.request.model)
-            metadataRow("Reasoning", value: entry.request.reasoningEffort)
-            metadataRow("Transport", value: entry.request.isStreaming ? "SSE stream" : "JSON")
-            if let usage = entry.tokenUsage {
-                metadataRow("Tokens", value: tokenUsageDescription(usage))
-                metadataRow("Cache", value: cacheUsageDescription(usage))
-            }
-        }
-        .padding(11)
-        .background(
-            PlainwordTheme.raisedSurface.opacity(0.55),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-        )
-    }
-
-    private func metadataRow(_ label: String, value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(PlainwordTheme.textSecondary)
-                .frame(width: 66, alignment: .leading)
-            Text(value)
-                .font(.caption.monospaced())
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func tokenUsageDescription(_ usage: LLMTokenUsage) -> String {
-        var parts: [String] = []
-        if let inputTokens = usage.inputTokens {
-            parts.append("\(inputTokens.formatted()) input")
-        }
-        if let outputTokens = usage.outputTokens {
-            parts.append("\(outputTokens.formatted()) output")
-        }
-        if let totalTokens = usage.totalTokens {
-            parts.append("\(totalTokens.formatted()) total")
-        }
-        return parts.isEmpty ? "Not reported" : parts.joined(separator: " · ")
-    }
-
-    private func cacheUsageDescription(_ usage: LLMTokenUsage) -> String {
-        let reads = usage.cacheReadTokens.map { $0.formatted() } ?? "Not reported"
-        let writes = usage.cacheWriteTokens.map { $0.formatted() } ?? "Not reported"
-        return "\(reads) read · \(writes) written"
-    }
-
-    @ViewBuilder
-    private var responseSection: some View {
-        switch entry.state {
-        case .inProgress:
-            HStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Waiting for the provider…")
+                    HStack(spacing: 6) {
+                        if case .inProgress = entry.state {
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.7)
+                                .frame(width: 12, height: 12)
+                        }
+                        Text(entry.listSummary)
+                            .lineLimit(1)
+                    }
                     .font(.caption)
-                    .foregroundStyle(PlainwordTheme.textSecondary)
-            }
+                    .foregroundStyle(PlainwordTheme.textTertiary)
+                }
 
-        case .succeeded:
-            debugTextBlock(
-                title: "Provider response",
-                text: Self.readableJSON(entry.responseBody ?? "")
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(
+                        isHovering ? PlainwordTheme.accent : PlainwordTheme.textTertiary
+                    )
+                    .accessibilityHidden(true)
+            }
+            .padding(13)
+            .contentShape(
+                RoundedRectangle(cornerRadius: PlainwordTheme.cardCornerRadius, style: .continuous)
             )
-
-        case .failed(_, let message):
-            VStack(alignment: .leading, spacing: 10) {
-                Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(PlainwordTheme.danger)
-                    .textSelection(.enabled)
-                if let responseBody = entry.responseBody, !responseBody.isEmpty {
-                    debugTextBlock(
-                        title: "Provider response",
-                        text: Self.readableJSON(responseBody)
-                    )
-                }
-            }
         }
-    }
-
-    private func debugTextBlock(title: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack {
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                Spacer()
-                Button {
-                    copyToPasteboard(text)
-                } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
-                }
-                .buttonStyle(.plain)
-                .font(.caption)
-                .foregroundStyle(PlainwordTheme.textSecondary)
-            }
-            debugText(text)
-        }
-    }
-
-    private func debugText(_ text: String) -> some View {
-        let preview = Self.boundedPreview(of: text)
-
-        return VStack(alignment: .leading, spacing: 8) {
-            Text(preview.text)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(PlainwordTheme.textPrimary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            if preview.isTruncated {
-                Label(
-                    "Preview truncated to keep the debug view responsive. "
-                        + "Copy includes the complete contents.",
-                    systemImage: "ellipsis.rectangle"
+        .buttonStyle(.plain)
+        .background {
+            if isHovering {
+                RoundedRectangle(
+                    cornerRadius: PlainwordTheme.cardCornerRadius,
+                    style: .continuous
                 )
-                .font(.caption)
-                .foregroundStyle(PlainwordTheme.textSecondary)
+                .fill(PlainwordTheme.accent.opacity(0.06))
             }
         }
-        .padding(11)
-        .background(
-            PlainwordTheme.raisedSurface.opacity(0.7),
-            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-        )
+        .plainwordGlass(cornerRadius: PlainwordTheme.cardCornerRadius, shadow: true)
+        .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovering)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint("Opens the full request and response for this call")
+        .help("Open this call")
     }
 
-    private static func boundedPreview(of text: String) -> (text: String, isTruncated: Bool) {
-        guard !text.isEmpty else {
-            return ("<empty>", false)
+    private var accessibilityLabel: String {
+        var parts = [
+            entry.statusDescription,
+            entry.request.model,
+            entry.request.startedAt.formatted(date: .omitted, time: .standard),
+            entry.listSummary
+        ]
+        if let subject = entry.subjectPreview {
+            parts.append("Text: " + subject)
         }
-
-        let maximumCharacterCount = 20_000
-        guard let endIndex = text.index(
-            text.startIndex,
-            offsetBy: maximumCharacterCount,
-            limitedBy: text.endIndex
-        ) else {
-            return (text, false)
-        }
-        guard endIndex != text.endIndex else {
-            return (text, false)
-        }
-
-        return (String(text[..<endIndex]), true)
-    }
-
-    private var statusBadge: some View {
-        Text(statusTitle)
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(statusColor)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(
-                statusColor.opacity(0.12),
-                in: Capsule()
-            )
-    }
-
-    private var statusTitle: String {
-        switch entry.state {
-        case .inProgress:
-            "Sending"
-        case .succeeded(let statusCode):
-            "HTTP \(statusCode)"
-        case .failed(let statusCode, _):
-            statusCode.map { "HTTP \($0)" } ?? "Failed"
-        }
-    }
-
-    private var statusColor: Color {
-        switch entry.state {
-        case .inProgress:
-            PlainwordTheme.accent
-        case .succeeded:
-            PlainwordTheme.success
-        case .failed:
-            PlainwordTheme.danger
-        }
-    }
-
-    private func copyToPasteboard(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-    }
-
-    private static func readableJSON(_ value: String) -> String {
-        guard let data = value.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data),
-              let formatted = try? JSONSerialization.data(
-                  withJSONObject: object,
-                  options: [.prettyPrinted, .sortedKeys]
-              ) else {
-            return value
-        }
-        return String(decoding: formatted, as: UTF8.self)
+        return parts.filter { !$0.isEmpty }.joined(separator: ", ")
     }
 }

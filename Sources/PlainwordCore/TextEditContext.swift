@@ -5,6 +5,9 @@ public enum TextEditTargetKind: String, Equatable, Sendable {
     case sentence
     case paragraph
     case document
+    /// An empty target at the caret: there is nothing to edit, so the request writes
+    /// new text instead of revising existing text.
+    case insertionPoint
 }
 
 public enum TextEditExtractionScope: Equatable, Sendable {
@@ -212,6 +215,30 @@ public enum TextEditContextExtractor {
                     targetText: text,
                     source: source
                 )
+        )
+    }
+
+    /// Returns a zero-length target at the caret of a field that holds no text.
+    ///
+    /// `extract` deliberately refuses an empty target, because every editing request
+    /// needs something to revise. Writing new text is the one case that does not, so it
+    /// gets its own entry point rather than a flag that would loosen that rule for
+    /// every caller.
+    public static func insertionPoint(
+        in fullText: String,
+        at utf16Location: Int
+    ) -> TextEditContext? {
+        let source = fullText as NSString
+        guard utf16Location >= 0,
+              utf16Location <= source.length,
+              !fullText.contains(where: { !$0.isWhitespace }) else {
+            return nil
+        }
+        return TextEditContext(
+            text: "",
+            utf16Location: utf16Location,
+            utf16Length: 0,
+            targetKind: .insertionPoint
         )
     }
 

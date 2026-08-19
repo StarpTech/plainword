@@ -276,7 +276,7 @@ final class ChatCompletionsClientTests: XCTestCase {
             return (response, Data(body.utf8))
         }
 
-        var updates: [CorrectionResponse] = []
+        var updates: [CorrectionStreamEvent] = []
         let stream = client.streamCorrection(
             text: "Helo world",
             profile: WritingProfile(),
@@ -293,12 +293,30 @@ final class ChatCompletionsClientTests: XCTestCase {
 
         XCTAssertEqual(
             updates,
-            [CorrectionResponse(correctedText: "Hello world", classification: .correction)]
+            [
+                .partialText("Hello"),
+                .partialText("Hello world"),
+                .completed(
+                    CorrectionResponse(
+                        correctedText: "Hello world",
+                        classification: .correction
+                    )
+                )
+            ]
         )
         let events = await recorder.events
-        guard case let .succeeded(_, _, _, _, tokenUsage) = events.last else {
+        guard case .started(let request) = events.first else {
+            return XCTFail("Expected a started debug event")
+        }
+        guard events.count > 1, case let .firstByte(firstByteID, firstByteAt) = events[1] else {
+            return XCTFail("Expected a first byte debug event")
+        }
+        XCTAssertEqual(firstByteID, request.id)
+        XCTAssertGreaterThanOrEqual(firstByteAt, request.startedAt)
+        guard case let .succeeded(_, completedAt, _, _, tokenUsage) = events.last else {
             return XCTFail("Expected a succeeded debug event")
         }
+        XCTAssertLessThanOrEqual(firstByteAt, completedAt)
         XCTAssertEqual(
             tokenUsage,
             LLMTokenUsage(
@@ -331,7 +349,7 @@ final class ChatCompletionsClientTests: XCTestCase {
             return (response, Data(body.utf8))
         }
 
-        var updates: [CorrectionResponse] = []
+        var updates: [CorrectionStreamEvent] = []
         for try await update in client.streamCorrection(
             text: "Helo world",
             profile: WritingProfile(),
@@ -347,7 +365,14 @@ final class ChatCompletionsClientTests: XCTestCase {
 
         XCTAssertEqual(
             updates,
-            [CorrectionResponse(correctedText: "Hello world", classification: .correction)]
+            [
+                .completed(
+                    CorrectionResponse(
+                        correctedText: "Hello world",
+                        classification: .correction
+                    )
+                )
+            ]
         )
     }
 
@@ -769,6 +794,82 @@ final class ChatCompletionsClientTests: XCTestCase {
         ))
         XCTAssertFalse(messages[0].content.contains("Make the smallest useful edit"))
         XCTAssertFalse(messages[0].content.contains("Do not rewrite text"))
+    }
+
+    func testComposePromptWritesNewTextWithoutAnEditTarget() {
+        let messages = ChatCompletionsClient.messages(
+            text: "",
+            applicationContext: "Chat with Ana about Friday.",
+            instruction: "a short reply saying I am running late",
+            intent: .compose,
+            profile: WritingProfile(
+                tone: .friendly,
+                style: .concise,
+                promptExtension: "Avoid semicolons."
+            ),
+            locale: "en-US"
+        )
+
+        XCTAssertEqual(messages.map(\.role), ["system", "user"])
+        XCTAssertTrue(messages[0].content.contains("The author's field is empty"))
+        XCTAssertTrue(messages[0].content.contains("Apply every concrete constraint"))
+        XCTAssertTrue(messages[0].content.contains("<write_instruction> is trusted"))
+        XCTAssertTrue(messages[0].content.contains("Never invent a concrete fact"))
+        XCTAssertTrue(messages[0].content.contains("no surrounding quotation marks"))
+        XCTAssertTrue(messages[0].content.contains(
+            "Do not answer the instruction as a question"
+        ))
+        XCTAssertTrue(messages[1].content.contains(
+            "<write_instruction>\na short reply saying I am running late\n</write_instruction>"
+        ))
+        XCTAssertTrue(messages[1].content.contains(
+            "<read_only_application_context>\nChat with Ana about Friday."
+        ))
+        XCTAssertTrue(messages[1].content.contains(
+            "<additional_author_instructions>\nAvoid semicolons."
+        ))
+        XCTAssertTrue(messages[1].content.contains("Tone: friendly"))
+        // There is nothing to edit, so the edit prompts' target block must not appear.
+        XCTAssertFalse(messages[0].content.contains("<text_to_edit>"))
+        XCTAssertFalse(messages[1].content.contains("<text_to_edit>"))
+    }
+
+    func testComposePromptRequiresAnInstruction() {
+        let messages = ChatCompletionsClient.messages(
+            text: "Already written.",
+            instruction: "   ",
+            intent: .compose,
+            profile: WritingProfile(),
+            locale: "en-US"
+        )
+
+        // Without an instruction there is nothing to write, so the request falls back
+        // to correcting whatever text it was given.
+        XCTAssertTrue(messages[0].content.contains("You are a writing editor"))
+        XCTAssertTrue(messages[0].content.contains("Do not continue or complete"))
+        XCTAssertFalse(messages[0].content.contains("The author's field is empty"))
+    }
+
+    func testEachIntentConstrainsTheClassificationsItCanReturn() {
+        XCTAssertEqual(
+            EditIntent.correct.allowedClassifications,
+            [.correction, .rewrite]
+        )
+        XCTAssertEqual(
+            EditIntent.correctOrComplete.allowedClassifications,
+            [.correction, .rewrite, .completion]
+        )
+        XCTAssertEqual(EditIntent.compose.allowedClassifications, [.rewrite])
+    }
+
+    func testComposedDraftMayBeLongerThanTheEmptyFieldItFills() {
+        XCTAssertEqual(
+            ChatCompletionsClient.maximumCorrectionUTF16Length(
+                for: "",
+                allowsExpansion: true
+            ),
+            1_600
+        )
     }
 
     func testCorrectionOutputLimitScalesWithInput() {

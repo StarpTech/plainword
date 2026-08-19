@@ -113,9 +113,9 @@ final class AccessibilityTextClient {
         return AXIsProcessTrustedWithOptions(options)
     }
 
-    func captureFocusedText(
-        scope: TextEditExtractionScope = .sentence
-    ) -> FocusedTextSnapshot? {
+    /// Resolves the focused writable text element, or nothing when the focus is not
+    /// somewhere Plainword may write.
+    private func focusedEditableElement() -> (element: AXUIElement, processIdentifier: pid_t)? {
         guard isTrusted else { return nil }
 
         let systemWideElement = AXUIElementCreateSystemWide()
@@ -143,8 +143,19 @@ final class AccessibilityTextClient {
         guard AXUIElementGetPid(element, &processIdentifier) == .success,
               processIdentifier != ProcessInfo.processInfo.processIdentifier,
               isWritableTextElement(element),
-              !hasMultipleSelections(element),
-              let textState = captureTextState(from: element, scope: scope) else {
+              !hasMultipleSelections(element) else {
+            return nil
+        }
+        return (element, processIdentifier)
+    }
+
+    func captureFocusedText(
+        scope: TextEditExtractionScope = .sentence
+    ) -> FocusedTextSnapshot? {
+        guard let focused = focusedEditableElement() else { return nil }
+        let element = focused.element
+        let processIdentifier = focused.processIdentifier
+        guard let textState = captureTextState(from: element, scope: scope) else {
             return nil
         }
         let selectedRange = textState.selectedRange
@@ -198,6 +209,68 @@ final class AccessibilityTextClient {
             context: context,
             anchor: anchorRect(
                 for: NSRange(location: selectedRange.location, length: selectedRange.length),
+                textLength: textState.documentUTF16Length,
+                in: element
+            )
+        )
+    }
+
+    /// Captures the caret of a focused field that holds no text.
+    ///
+    /// `captureFocusedText` has nothing to return here, because every editing request
+    /// needs text to work from. An empty field is not a failure though: it is a place
+    /// to write, so it gets a snapshot whose target is the caret itself.
+    func captureFocusedInsertionPoint() -> FocusedTextSnapshot? {
+        guard let focused = focusedEditableElement() else {
+            logger.debug("Writing: no writable text element is focused")
+            return nil
+        }
+        let element = focused.element
+        let processIdentifier = focused.processIdentifier
+        guard let textState = captureTextState(from: element, scope: .document) else {
+            logger.debug("Writing: the focused field did not report a readable state")
+            return nil
+        }
+        guard textState.documentUTF16Length == 0,
+              textState.range.location == 0,
+              textState.selectedRange.length == 0,
+              let context = TextEditContextExtractor.insertionPoint(
+                in: textState.text,
+                at: textState.selectedRange.location
+              ) else {
+            logger.debug(
+                """
+                Writing: the focused field is not empty \
+                (\(textState.documentUTF16Length, privacy: .public) characters, \
+                selection at \(textState.selectedRange.location, privacy: .public) \
+                length \(textState.selectedRange.length, privacy: .public))
+                """
+            )
+            return nil
+        }
+
+        let runningApplication = NSRunningApplication(processIdentifier: processIdentifier)
+        let applicationName = runningApplication?.localizedName ?? "Another app"
+
+        return FocusedTextSnapshot(
+            element: element,
+            processIdentifier: processIdentifier,
+            applicationIdentifier: runningApplication?.bundleIdentifier,
+            applicationName: applicationName,
+            fullText: textState.text,
+            capturedTextRange: textState.range,
+            documentUTF16Length: textState.documentUTF16Length,
+            selectedRange: textState.selectedRange,
+            // The surrounding interface is what a draft has to go on, so the harvest in
+            // `enriched(_:)` matters more here than anywhere else.
+            context: context.withApplicationContext(
+                [.init(kind: .sourceApplication, text: applicationName)]
+            ),
+            anchor: anchorRect(
+                for: NSRange(
+                    location: textState.selectedRange.location,
+                    length: textState.selectedRange.length
+                ),
                 textLength: textState.documentUTF16Length,
                 in: element
             )
@@ -287,6 +360,16 @@ final class AccessibilityTextClient {
 
         if scope == .document, documentLength > maximumManualReviewLength {
             return nil
+        }
+        // An empty field has no range to read. Applications differ on whether they
+        // answer AXStringForRange or AXValue for one, so state it directly instead.
+        if documentLength == 0 {
+            return validatedTextState(CapturedTextState(
+                text: "",
+                range: NSRange(location: 0, length: 0),
+                documentUTF16Length: 0,
+                selectedRange: selectedRange
+            ), from: element)
         }
         if let completeValue, (completeValue as NSString).length == documentLength {
             return validatedTextState(CapturedTextState(
@@ -418,7 +501,9 @@ final class AccessibilityTextClient {
         case .rewrite:
             sourceRanges = [snapshot.context.range]
             style = .rewrite
-        case .completion:
+        case .completion, .composition:
+            // Neither marks existing text: one appends to it, the other writes where
+            // there is none.
             return nil
         }
 
@@ -458,7 +543,7 @@ final class AccessibilityTextClient {
             return segments.contains(where: { trimmedRemovedRange($0) != nil })
         case .rewrite:
             return true
-        case .completion:
+        case .completion, .composition:
             return false
         }
     }
@@ -639,7 +724,7 @@ final class AccessibilityTextClient {
                 from: element
             ), selectedRange.location == range.location,
                selectedRange.length == range.length,
-               stringAttribute(kAXSelectedTextAttribute, from: element) == originalText {
+               (stringAttribute(kAXSelectedTextAttribute, from: element) ?? "") == originalText {
                 return true
             }
             if attempt < 7 {
@@ -777,6 +862,9 @@ final class AccessibilityTextClient {
     }
 
     private func capturedText(in range: NSRange, from element: AXUIElement) -> String? {
+        // Reading an empty range back would otherwise depend on the application
+        // answering a parameterized query about nothing.
+        if range.length == 0 { return "" }
         if let completeValue = stringAttribute(kAXValueAttribute, from: element),
            range.location == 0,
            (completeValue as NSString).length == range.length {

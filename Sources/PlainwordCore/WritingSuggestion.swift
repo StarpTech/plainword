@@ -4,6 +4,9 @@ public enum WritingSuggestionKind: String, Codable, Equatable, Sendable {
     case correction
     case completion
     case rewrite
+    /// Text written from an instruction rather than revised from existing text. It has
+    /// no original to diff against, so it is presented and applied as a whole draft.
+    case composition
 }
 
 public struct WritingTextChange: Equatable, Sendable {
@@ -128,6 +131,10 @@ public enum WritingSuggestionPlanner {
             kind = .rewrite
         case .completion:
             return nil
+        case .composition:
+            // Composition never comes from an edit request; it is built by
+            // `makeComposition` for a field that had nothing to edit.
+            return nil
         case nil:
             kind = isFocusedCorrection ? .correction : .rewrite
         }
@@ -137,6 +144,22 @@ public enum WritingSuggestionPlanner {
             originalText: originalText,
             replacementText: replacementText,
             changes: changes
+        )
+    }
+
+    /// Returns a draft written for an empty field.
+    ///
+    /// None of `make`'s guards apply here: there is no original meaning to preserve, no
+    /// language to keep, and inventing concrete detail is the point rather than a
+    /// failure. All that is left to check is that the model wrote something.
+    public static func makeComposition(_ replacementText: String) -> WritingSuggestion? {
+        let draft = replacementText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !draft.isEmpty else { return nil }
+        return WritingSuggestion(
+            kind: .composition,
+            originalText: "",
+            replacementText: draft,
+            changes: [.init(original: "", replacement: draft)]
         )
     }
 

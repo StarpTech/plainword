@@ -78,6 +78,15 @@ final class CrossAppCorrectionController: ObservableObject {
         category: "Correction"
     )
     private var excludedApplicationIdentifiers: Set<String>
+    /// Applications the author has switched interface reading on for. Sending is off
+    /// until asked for, so absence from this set is the default.
+    private var contextEnabledApplicationIdentifiers: Set<String>
+    /// What the surrounding interface offered for the suggestion on screen, whether or
+    /// not it was sent. Finding happens on this machine; sending is the separate,
+    /// switched decision below.
+    private var pendingAvailableContext: TextEditContext?
+    /// Whether the suggestion on screen was actually given that context.
+    private var pendingRequestSentContext = false
     private var applicationActivationObserver: NSObjectProtocol?
     private var activeApplicationProcessIdentifier: pid_t?
     private var activeApplicationActivationScreenFrame: CGRect?
@@ -86,6 +95,8 @@ final class CrossAppCorrectionController: ObservableObject {
     private var applyShortcutEventTapSource: CFRunLoopSource?
     private var mouseMonitor: Any?
     private var permissionTask: Task<Void, Never>?
+    /// Keeps App Nap from throttling the run loop that answers the shortcut tap.
+    private var shortcutActivity: NSObjectProtocol?
     private var correctionTask: Task<Void, Never>?
     private var sourceOverlayTrackingTask: Task<Void, Never>?
     private var proposalRevalidationTask: Task<Void, Never>?
@@ -109,7 +120,11 @@ final class CrossAppCorrectionController: ObservableObject {
     private var suggestionCache = CorrectionSuggestionCache()
     private var reviewShortcutGate = ShortcutInvocationGate(minimumInterval: 0.35)
     private var transformShortcutGate = ShortcutInvocationGate(minimumInterval: 0.35)
-    private var shortcutReviewGeneration: Int?
+    /// The review that is currently running, if there is one.
+    ///
+    /// A second review press replaces it rather than waiting for it, so this marks the
+    /// request to cancel and the panel to reuse when that happens.
+    private var runningReviewGeneration: Int?
 
     init(settings: SettingsStore, defaults: UserDefaults = .standard) {
         self.settings = settings
@@ -118,6 +133,9 @@ final class CrossAppCorrectionController: ObservableObject {
             ?? [:]
         excludedApplications = Self.sortedApplications(from: storedApplications)
         excludedApplicationIdentifiers = Set(storedApplications.keys)
+        contextEnabledApplicationIdentifiers = Set(
+            defaults.stringArray(forKey: "contextEnabledApplications") ?? []
+        )
         isListeningEnabled = defaults.object(forKey: "assistantListeningEnabled") as? Bool ?? true
     }
 
@@ -133,6 +151,13 @@ final class CrossAppCorrectionController: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
+        // A menu bar app spends its life in the background, where App Nap is free to
+        // throttle it. A throttled run loop answers the event tap too late, and macOS
+        // switches shortcut delivery off for being slow.
+        shortcutActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep],
+            reason: "Answering global keyboard shortcuts"
+        )
         startTrackingActiveApplication()
         refreshAccessibilityState()
 
@@ -180,9 +205,12 @@ final class CrossAppCorrectionController: ObservableObject {
     }
 
     func prepareManualReview() {
+        // Opening the menu moves focus away from the field, so whatever it offers has
+        // to be captured now. An empty field offers its caret.
         guard isReady,
               !isActiveApplicationExcluded,
-              let snapshot = accessibility.captureFocusedText(scope: .document) else {
+              let snapshot = accessibility.captureFocusedText(scope: .document)
+                ?? accessibility.captureFocusedInsertionPoint() else {
             preparedManualSnapshot = nil
             preparedManualSnapshotDate = nil
             return
@@ -206,6 +234,7 @@ final class CrossAppCorrectionController: ObservableObject {
         let snapshot = preparedIsFresh
             ? preparedManualSnapshot
             : accessibility.captureFocusedText(scope: .document)
+                ?? accessibility.captureFocusedInsertionPoint()
         preparedManualSnapshot = nil
         preparedManualSnapshotDate = nil
 
@@ -217,6 +246,11 @@ final class CrossAppCorrectionController: ObservableObject {
         }
         guard accessibility.snapshotState(snapshot) == .unchanged else {
             activity = .failure("The focused text changed before it could be reviewed.")
+            return
+        }
+        // Nothing to review in an empty field, so write into it instead.
+        if snapshot.context.targetKind == .insertionPoint {
+            presentComposePrompt(for: snapshot)
             return
         }
 
@@ -240,6 +274,7 @@ final class CrossAppCorrectionController: ObservableObject {
 
         let snapshot = consumePreparedManualSnapshot()
             ?? accessibility.captureFocusedText(scope: .document)
+            ?? accessibility.captureFocusedInsertionPoint()
         guard let snapshot else {
             activity = .failure(
                 "Select up to 1,600 characters or focus a text field containing up to 6,000 characters."
@@ -248,6 +283,11 @@ final class CrossAppCorrectionController: ObservableObject {
         }
         guard accessibility.snapshotState(snapshot) == .unchanged else {
             activity = .failure("The focused text changed before it could be transformed.")
+            return
+        }
+        // Nothing to transform in an empty field, so write into it instead.
+        if snapshot.context.targetKind == .insertionPoint {
+            presentComposePrompt(for: snapshot)
             return
         }
 
@@ -303,10 +343,12 @@ final class CrossAppCorrectionController: ObservableObject {
         isApplyingProposal = false
         correctionTask?.cancel()
         correctionTask = nil
-        shortcutReviewGeneration = nil
+        runningReviewGeneration = nil
         pendingSnapshot = nil
         pendingCorrectionText = nil
         pendingSuggestion = nil
+        pendingAvailableContext = nil
+        pendingRequestSentContext = false
         suggestionHistory.removeAll()
         pendingPanelAnchor = nil
         isPanelAnchorPinned = false
@@ -319,13 +361,17 @@ final class CrossAppCorrectionController: ObservableObject {
     func stop() {
         applicationTask?.cancel()
         correctionTask?.cancel()
-        shortcutReviewGeneration = nil
+        runningReviewGeneration = nil
         permissionTask?.cancel()
         proposalRevalidationTask?.cancel()
         setEventMonitoringEnabled(false)
         accessibilityChanges.stop()
         stopTrackingActiveApplication()
         dismissProposalUI()
+        if let shortcutActivity {
+            ProcessInfo.processInfo.endActivity(shortcutActivity)
+        }
+        shortcutActivity = nil
         started = false
     }
 
@@ -370,8 +416,13 @@ final class CrossAppCorrectionController: ObservableObject {
             return
         }
 
-        let snapshot = await accessibility.enriched(capturedSnapshot)
+        let contextualized = await contextualized(capturedSnapshot)
         guard isCurrentCorrection(generation) else { return }
+        let snapshot = contextualized.sent
+        pendingAvailableContext = contextualized.available
+        pendingRequestSentContext = isContextSendingEnabled(
+            forApplicationIdentifier: snapshot.applicationIdentifier
+        )
 
         let promptLocaleIdentifier = promptLanguageIdentifier(for: snapshot.context)
         let intent = EditIntent.correct
@@ -412,9 +463,19 @@ final class CrossAppCorrectionController: ObservableObject {
                 intent: intent,
                 locale: promptLocaleIdentifier
             )
-            for try await response in stream {
+            for try await event in stream {
                 try Task.checkCancellation()
-                correctionResponse = response
+                switch event {
+                case .partialText(let text):
+                    // The compact review shows nothing but a small marker until it has
+                    // a result, so there is no panel there to write into.
+                    guard !compactPresentation, isCurrentCorrection(generation) else {
+                        continue
+                    }
+                    proposalPanel.updateStreamingText(text)
+                case .completed(let response):
+                    correctionResponse = response
+                }
             }
             guard let correctionResponse else {
                 throw ChatCompletionsClientError.invalidResponse
@@ -525,6 +586,137 @@ final class CrossAppCorrectionController: ObservableObject {
         )
     }
 
+    private func presentComposePrompt(for snapshot: FocusedTextSnapshot) {
+        correctionGeneration &+= 1
+        applicationTask?.cancel()
+        applicationTask = nil
+        correctionTask?.cancel()
+        correctionTask = nil
+        proposalRevalidationTask?.cancel()
+        proposalRevalidationTask = nil
+        stopSourceOverlay()
+
+        pendingSnapshot = snapshot
+        pendingCorrectionText = nil
+        pendingSuggestion = nil
+        suggestionHistory.removeAll()
+        isProposalVisible = true
+        isProposalSuspended = false
+        isCustomPromptVisible = true
+        isReviewTriggerVisible = false
+        activity = .waiting
+        let anchor = pendingPanelAnchor ?? snapshot.anchor
+        pendingPanelAnchor = anchor
+        proposalPanel.showPrompt(
+            near: anchor,
+            title: "Write something",
+            isComposing: true,
+            onSubmit: { [weak self] prompt in
+                self?.submitComposePrompt(prompt)
+            },
+            onDismiss: { [weak self] in
+                self?.dismissProposal()
+            }
+        )
+    }
+
+    private func submitComposePrompt(_ rawPrompt: String) {
+        let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty,
+              prompt.count <= 500,
+              let snapshot = pendingSnapshot else {
+            return
+        }
+        guard accessibility.snapshotState(snapshot) == .unchanged else {
+            dismissProposal()
+            activity = .failure("The field changed before anything could be written.")
+            return
+        }
+
+        correctionGeneration &+= 1
+        let generation = correctionGeneration
+        isCustomPromptVisible = false
+        activity = .correcting(snapshot.applicationName)
+        proposalPanel.showProcessing(
+            near: pendingPanelAnchor ?? snapshot.anchor,
+            onAccept: {},
+            onDismiss: { [weak self] in
+                self?.dismissProposal()
+            }
+        )
+        correctionTask = Task { [weak self] in
+            await self?.requestComposition(
+                prompt,
+                for: snapshot,
+                generation: generation
+            )
+        }
+    }
+
+    private func requestComposition(
+        _ instruction: String,
+        for snapshot: FocusedTextSnapshot,
+        generation: Int
+    ) async {
+        let contextualized = await contextualized(snapshot.context, for: snapshot)
+        guard isCurrentCorrection(generation) else { return }
+        let requestContext = contextualized.sent
+        pendingAvailableContext = contextualized.available
+        pendingRequestSentContext = isContextSendingEnabled(
+            forApplicationIdentifier: snapshot.applicationIdentifier
+        )
+
+        do {
+            var correctionResponse: CorrectionResponse?
+            let stream = try settings.streamCorrection(
+                requestContext,
+                intent: .compose,
+                locale: promptLanguageIdentifier(forInstruction: instruction),
+                instruction: instruction
+            )
+            for try await event in stream {
+                try Task.checkCancellation()
+                switch event {
+                case .partialText(let text):
+                    guard isCurrentCorrection(generation) else { continue }
+                    proposalPanel.updateStreamingText(text)
+                case .completed(let response):
+                    correctionResponse = response
+                }
+            }
+            guard let correctionResponse else {
+                throw ChatCompletionsClientError.invalidResponse
+            }
+            guard isCurrentCorrection(generation) else { return }
+            guard accessibility.snapshotState(snapshot) == .unchanged else {
+                pendingSnapshot = nil
+                pendingCorrectionText = nil
+                pendingSuggestion = nil
+                dismissProposalUI()
+                activity = .failure("The field changed before anything could be written.")
+                return
+            }
+            guard let suggestion = WritingSuggestionPlanner.makeComposition(
+                correctionResponse.correctedText
+            ) else {
+                dismissProposal()
+                activity = .failure("That instruction did not produce any text.")
+                return
+            }
+            present(suggestion, for: snapshot, compact: false)
+        } catch is CancellationError {
+            guard correctionGeneration == generation else { return }
+            dismissProposal()
+        } catch {
+            guard isCurrentCorrection(generation) else { return }
+            correctionTask = nil
+            pendingCorrectionText = nil
+            pendingSuggestion = nil
+            activity = .failure(error.localizedDescription)
+            proposalPanel.showFailure(error.localizedDescription)
+        }
+    }
+
     private func restoreSuggestion(
         _ suggestion: WritingSuggestion,
         for snapshot: FocusedTextSnapshot
@@ -570,18 +762,20 @@ final class CrossAppCorrectionController: ObservableObject {
         )
     }
 
-    private func reviewPendingText(startedFromShortcut: Bool = false) {
+    private func reviewPendingText() {
         guard let snapshot = pendingSnapshot,
               accessibility.snapshotState(snapshot) == .unchanged else {
             dismissProposal()
             return
         }
+        startReview(for: snapshot)
+    }
 
+    /// Runs a review through the panel that is already on screen.
+    private func startReview(for snapshot: FocusedTextSnapshot) {
         correctionGeneration &+= 1
         let generation = correctionGeneration
-        if startedFromShortcut {
-            shortcutReviewGeneration = generation
-        }
+        runningReviewGeneration = generation
         isReviewTriggerVisible = false
         activity = .correcting(snapshot.applicationName)
         proposalPanel.showPromptTriggerLoading()
@@ -592,13 +786,48 @@ final class CrossAppCorrectionController: ObservableObject {
                 generation: generation,
                 compactPresentation: false
             )
-            // Keep the review idempotent until the final panel resize animation has
-            // left AppKit's display cycle as well as until the provider work is done.
-            try? await Task.sleep(for: .milliseconds(250))
-            if self.shortcutReviewGeneration == generation {
-                self.shortcutReviewGeneration = nil
+            if self.runningReviewGeneration == generation {
+                self.runningReviewGeneration = nil
             }
         }
+    }
+
+    /// Drops the review that is running and reviews whatever is focused now.
+    ///
+    /// The cancelled request's panel stays on screen and returns to its loading marker.
+    /// Dismissing it and building a new one in the same pass leaves AppKit laying out a
+    /// panel that is already gone, which is what made a second press unsafe before.
+    private func restartRunningReview() {
+        correctionGeneration &+= 1
+        runningReviewGeneration = nil
+        correctionTask?.cancel()
+        correctionTask = nil
+        proposalRevalidationTask?.cancel()
+        proposalRevalidationTask = nil
+        stopSourceOverlay()
+        pendingCorrectionText = nil
+        pendingSuggestion = nil
+        pendingAvailableContext = nil
+        pendingRequestSentContext = false
+        suggestionHistory.removeAll()
+
+        guard let snapshot = captureSnapshotForExplicitReview(),
+              snapshot.context.text
+                .trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 else {
+            // Nothing left to review, so the cancelled request's panel has no result
+            // coming and closing it is the only honest thing to do.
+            dismissProposal()
+            activity = .failure(
+                "Select text or place the cursor in a paragraph to review it."
+            )
+            return
+        }
+
+        pendingSnapshot = snapshot
+        pendingPanelAnchor = snapshot.anchor
+        isPanelAnchorPinned = true
+        proposalPanel.reposition(near: snapshot.anchor, animated: true)
+        startReview(for: snapshot)
     }
 
     private func finishReviewWithoutSuggestion(compactPresentation: Bool) {
@@ -669,8 +898,13 @@ final class CrossAppCorrectionController: ObservableObject {
         previousSuggestion: WritingSuggestion?,
         generation: Int
     ) async {
-        let editContext = await accessibility.enriched(capturedEditContext, for: snapshot)
+        let contextualized = await contextualized(capturedEditContext, for: snapshot)
         guard isCurrentCorrection(generation) else { return }
+        let editContext = contextualized.sent
+        pendingAvailableContext = contextualized.available
+        pendingRequestSentContext = isContextSendingEnabled(
+            forApplicationIdentifier: snapshot.applicationIdentifier
+        )
         let locale = promptLanguageIdentifier(for: editContext)
 
         do {
@@ -681,9 +915,15 @@ final class CrossAppCorrectionController: ObservableObject {
                 locale: locale,
                 instruction: instruction
             )
-            for try await response in stream {
+            for try await event in stream {
                 try Task.checkCancellation()
-                correctionResponse = response
+                switch event {
+                case .partialText(let text):
+                    guard isCurrentCorrection(generation) else { continue }
+                    proposalPanel.updateStreamingText(text)
+                case .completed(let response):
+                    correctionResponse = response
+                }
             }
             guard let correctionResponse else {
                 throw ChatCompletionsClientError.invalidResponse
@@ -733,14 +973,94 @@ final class CrossAppCorrectionController: ObservableObject {
         }
     }
 
+    func isContextSendingEnabled(forApplicationIdentifier identifier: String?) -> Bool {
+        guard let identifier else { return false }
+        return contextEnabledApplicationIdentifiers.contains(identifier)
+    }
+
+    /// Records whether the next suggestion in this application should be sent the
+    /// surrounding interface.
+    ///
+    /// This issues no request. The suggestion on screen was already made under the
+    /// previous setting and is left exactly as it is; only what the panel says about it
+    /// changes.
+    private func setContextSendingEnabled(
+        _ isEnabled: Bool,
+        forApplicationIdentifier identifier: String?
+    ) {
+        guard let identifier else { return }
+        if isEnabled {
+            contextEnabledApplicationIdentifiers.insert(identifier)
+        } else {
+            contextEnabledApplicationIdentifiers.remove(identifier)
+            // Entries made while sending was on carry that context in their key, but
+            // dropping them keeps a suggestion that was shaped by the interface from
+            // reappearing once the author has asked for that to stop.
+            suggestionCache = CorrectionSuggestionCache()
+        }
+        defaults.set(
+            Array(contextEnabledApplicationIdentifiers).sorted(),
+            forKey: "contextEnabledApplications"
+        )
+    }
+
+    /// Reads the surrounding interface and returns both what it offered and what should
+    /// actually be sent.
+    ///
+    /// Reading happens on this machine either way, so the panel can always show what is
+    /// there; only the `sent` context leaves it. The author's own sentences on either
+    /// side of the edit always travel with the request — those are the text being worked
+    /// on, not something read from the interface.
+    private func contextualized(
+        _ snapshot: FocusedTextSnapshot
+    ) async -> (sent: FocusedTextSnapshot, available: TextEditContext) {
+        let enriched = await accessibility.enriched(snapshot)
+        guard isContextSendingEnabled(
+            forApplicationIdentifier: snapshot.applicationIdentifier
+        ) else {
+            return (
+                enriched.withContext(enriched.context.withApplicationContext([])),
+                enriched.context
+            )
+        }
+        return (enriched, enriched.context)
+    }
+
+    private func contextualized(
+        _ context: TextEditContext,
+        for snapshot: FocusedTextSnapshot
+    ) async -> (sent: TextEditContext, available: TextEditContext) {
+        let enriched = await accessibility.enriched(context, for: snapshot)
+        guard isContextSendingEnabled(
+            forApplicationIdentifier: snapshot.applicationIdentifier
+        ) else {
+            return (enriched.withApplicationContext([]), enriched)
+        }
+        return (enriched, enriched)
+    }
+
     private func promptLanguageIdentifier(for context: TextEditContext) -> String {
+        promptLanguageIdentifier(
+            detecting: TextLanguageDetector.dominantLanguageIdentifier(in: context)
+        )
+    }
+
+    /// Composing has no text of its own yet, so the instruction is the only thing whose
+    /// language the result can be expected to match.
+    private func promptLanguageIdentifier(forInstruction instruction: String) -> String {
+        promptLanguageIdentifier(
+            detecting: TextLanguageDetector.dominantLanguageIdentifier(in: instruction)
+        )
+    }
+
+    private func promptLanguageIdentifier(detecting detected: @autoclosure () -> String?) -> String {
         switch settings.spellingLanguageMode {
         case .fixed:
             return settings.fixedSpellingLanguageIdentifier
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .nonEmpty ?? "unspecified"
         case .automatic:
-            return TextLanguageDetector.dominantLanguageIdentifier(in: context) ?? "unspecified"
+            return detected() ?? "unspecified"
         case .disabled:
             return "unspecified"
         }
@@ -843,6 +1163,14 @@ final class CrossAppCorrectionController: ObservableObject {
         proposalPanel.showSuggestion(
             suggestion,
             presentation: presentation,
+            contextReceipt: ReadOnlyContextReceipt.items(
+                for: pendingAvailableContext ?? snapshot.context
+            ),
+            contextApplicationName: snapshot.applicationName,
+            isContextSendingEnabled: isContextSendingEnabled(
+                forApplicationIdentifier: snapshot.applicationIdentifier
+            ),
+            contextWasSentWithSuggestion: pendingRequestSentContext,
             near: anchor,
             onAccept: { [weak self] in
                 self?.acceptProposal()
@@ -853,6 +1181,12 @@ final class CrossAppCorrectionController: ObservableObject {
             onBack: onBack,
             onRequestPrompt: { [weak self] in
                 self?.showCustomPromptForPendingText()
+            },
+            onSetContextSendingEnabled: { [weak self] isEnabled in
+                self?.setContextSendingEnabled(
+                    isEnabled,
+                    forApplicationIdentifier: snapshot.applicationIdentifier
+                )
             }
         )
         if isProposalSuspended {
@@ -1160,6 +1494,13 @@ final class CrossAppCorrectionController: ObservableObject {
 
     private func requestTransformFromShortcut() {
         guard isReady else {
+            logger.debug(
+                """
+                Transform shortcut ignored: listening \(self.isListeningEnabled, privacy: .public), \
+                accessibility \(self.isAccessibilityTrusted, privacy: .public), \
+                provider configured \(self.settings.isLLMConfigured, privacy: .public)
+                """
+            )
             updateIdleActivity()
             return
         }
@@ -1169,21 +1510,30 @@ final class CrossAppCorrectionController: ObservableObject {
         }
 
         cancelPendingCorrection(dismissProposal: true)
-        guard let snapshot = accessibility.captureFocusedText(scope: .document) else {
-            activity = .failure(
-                "Select up to 1,600 characters or focus a text field containing up to 6,000 characters."
-            )
+        if let snapshot = accessibility.captureFocusedText(scope: .document) {
+            presentCustomPrompt(for: snapshot)
             return
         }
-        presentCustomPrompt(for: snapshot)
+        // An empty field has nothing to transform, but it is the one place where an
+        // instruction alone is enough to work from.
+        if let snapshot = accessibility.captureFocusedInsertionPoint() {
+            presentComposePrompt(for: snapshot)
+            return
+        }
+        activity = .failure(
+            "Select up to 1,600 characters or focus a text field containing up to 6,000 characters."
+        )
     }
 
     private func requestReviewFromShortcut() {
-        // A second press used to cancel and immediately rebuild the visible SwiftUI
-        // panel while AppKit was still laying it out. Treat review as idempotent until
-        // the current request completes; ordinary typing and dismissal still cancel it.
-        guard shortcutReviewGeneration == nil else { return }
         guard isReady else {
+            logger.debug(
+                """
+                Review shortcut ignored: listening \(self.isListeningEnabled, privacy: .public), \
+                accessibility \(self.isAccessibilityTrusted, privacy: .public), \
+                provider configured \(self.settings.isLLMConfigured, privacy: .public)
+                """
+            )
             updateIdleActivity()
             return
         }
@@ -1199,17 +1549,32 @@ final class CrossAppCorrectionController: ObservableObject {
             return
         }
 
+        // A press while a review is still running replaces it instead of queueing
+        // behind it, so a slow provider never leaves the shortcut feeling stuck.
+        if runningReviewGeneration != nil {
+            logger.debug("Review shortcut restarting a review that is still running")
+            restartRunningReview()
+            return
+        }
+
         cancelPendingCorrection(dismissProposal: true)
         guard let snapshot = captureSnapshotForExplicitReview(),
               snapshot.context.text
                 .trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 else {
+            // An empty field has nothing to review, but it is still somewhere the
+            // author wants text. Both shortcuts lead here rather than only the one
+            // that happens to be for transforming.
+            if let composeSnapshot = accessibility.captureFocusedInsertionPoint() {
+                presentComposePrompt(for: composeSnapshot)
+                return
+            }
             activity = .failure(
                 "Select text or place the cursor in a paragraph to review it."
             )
             return
         }
         presentReviewTrigger(for: snapshot)
-        reviewPendingText(startedFromShortcut: true)
+        reviewPendingText()
     }
 
     private func captureSnapshotForExplicitReview() -> FocusedTextSnapshot? {
@@ -1278,12 +1643,14 @@ final class CrossAppCorrectionController: ObservableObject {
         pendingSnapshot = nil
         pendingCorrectionText = nil
         pendingSuggestion = nil
+        pendingAvailableContext = nil
+        pendingRequestSentContext = false
         suggestionHistory.removeAll()
         pendingPanelAnchor = nil
         isPanelAnchorPinned = false
         proposalRevalidationTask?.cancel()
         proposalRevalidationTask = nil
-        shortcutReviewGeneration = nil
+        runningReviewGeneration = nil
         if dismissProposal {
             dismissProposalUI()
         }
@@ -1323,6 +1690,7 @@ final class CrossAppCorrectionController: ObservableObject {
     private func setEventMonitoringEnabled(_ enabled: Bool) {
         if enabled {
             installApplyShortcutEventTapIfNeeded()
+            rearmEventDeliveryIfDisabled()
             startAccessibilityChangeObservationIfPossible()
             if keyMonitor == nil {
                 keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -1480,6 +1848,39 @@ final class CrossAppCorrectionController: ObservableObject {
         applyShortcutEventTapSource = source
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: eventTap, enable: true)
+    }
+
+    /// Puts shortcut delivery back when the system has quietly switched it off.
+    ///
+    /// macOS disables an event tap whose process was too slow to answer it, which a
+    /// menu bar app can be after App Nap throttles it or a stalled accessibility call
+    /// holds the main thread. The tap reports that to its own callback, but the passive
+    /// monitor behind `addGlobalMonitorForEvents` dies in the same moment and AppKit
+    /// never revives it or tells anyone. Both stayed dead until the app was restarted,
+    /// so this runs with the accessibility poll and re-arms whatever went quiet.
+    private func rearmEventDeliveryIfDisabled() {
+        guard let eventTap = applyShortcutEventTap,
+              !CGEvent.tapIsEnabled(tap: eventTap) else {
+            return
+        }
+        logger.notice("Shortcut delivery was switched off by the system; re-arming it")
+        CGEvent.tapEnable(tap: eventTap, enable: true)
+        if !CGEvent.tapIsEnabled(tap: eventTap) {
+            // Re-enabling a tap the system has given up on does not always take, so
+            // build a new one rather than leaving a dead port in place.
+            removeApplyShortcutEventTap()
+            installApplyShortcutEventTapIfNeeded()
+        }
+        recycleGlobalMonitors()
+    }
+
+    /// There is no way to ask whether a global monitor is still alive, so a disabled
+    /// tap is taken as the answer for both and the monitors are simply rebuilt.
+    private func recycleGlobalMonitors() {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
+        keyMonitor = nil
+        mouseMonitor = nil
     }
 
     private func handleMonitoredShortcut(_ event: NSEvent) -> Bool {

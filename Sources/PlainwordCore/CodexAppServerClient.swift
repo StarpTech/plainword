@@ -247,15 +247,23 @@ public actor CodexAppServerClient {
     private struct TurnResult: Sendable {
         let text: String
         let usage: LLMTokenUsage?
+        /// When the agent produced its first output, the local stand-in for a network
+        /// time to first byte.
+        let firstOutputAt: Date?
     }
 
     private struct ActiveTurn {
         var turnID: String?
+        var firstOutputAt: Date?
         var streamedText = ""
+        var partialText = ""
         var finalText: String?
         var usage: LLMTokenUsage?
         var errorMessage: String?
         let continuation: CheckedContinuation<TurnResult, Error>
+        /// Reports the corrected text read out of the answer so far, if anyone is
+        /// waiting to show it.
+        let onPartialText: (@Sendable (String) -> Void)?
     }
 
     private let configuredExecutableURL: URL?
@@ -360,7 +368,8 @@ public actor CodexAppServerClient {
         intent: EditIntent = .correctOrComplete,
         profile: WritingProfile,
         locale: String,
-        settings: LLMSettings
+        settings: LLMSettings,
+        onPartialText: (@Sendable (String) -> Void)? = nil
     ) async throws -> CorrectionResponse {
         let messages = ChatCompletionsClient.messages(
             text: text,
@@ -412,7 +421,8 @@ public actor CodexAppServerClient {
                         userPrompt: messages[1].content,
                         model: model,
                         thinkingMode: settings.thinkingMode,
-                        intent: intent
+                        intent: intent,
+                        onPartialText: onPartialText
                     )
                     let correction = try ChatCompletionsClient.decodeStructuredCorrection(
                         result.text,
@@ -420,6 +430,11 @@ public actor CodexAppServerClient {
                         summary: "\(profile.tone.displayName) · \(profile.style.displayName)",
                         allowsExpansion: instruction != nil
                     )
+                    if let firstOutputAt = result.firstOutputAt {
+                        await debugHandler?(
+                            .firstByte(id: debugRequest.id, at: firstOutputAt)
+                        )
+                    }
                     await debugHandler?(
                         .succeeded(
                             id: debugRequest.id,
@@ -464,7 +479,7 @@ public actor CodexAppServerClient {
         profile: WritingProfile,
         locale: String,
         settings: LLMSettings
-    ) -> AsyncThrowingStream<CorrectionResponse, Error> {
+    ) -> AsyncThrowingStream<CorrectionStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -478,9 +493,12 @@ public actor CodexAppServerClient {
                         intent: intent,
                         profile: profile,
                         locale: locale,
-                        settings: settings
+                        settings: settings,
+                        onPartialText: { partial in
+                            continuation.yield(.partialText(partial))
+                        }
                     )
-                    continuation.yield(correction)
+                    continuation.yield(.completed(correction))
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -546,13 +564,7 @@ public actor CodexAppServerClient {
         intent: EditIntent,
         thinkingMode: ThinkingMode
     ) -> CodexJSONValue {
-        let classifications = intent == .correct
-            ? [WritingSuggestionKind.correction.rawValue, WritingSuggestionKind.rewrite.rawValue]
-            : [
-                WritingSuggestionKind.correction.rawValue,
-                WritingSuggestionKind.rewrite.rawValue,
-                WritingSuggestionKind.completion.rawValue
-            ]
+        let classifications = intent.allowedClassifications.map(\.rawValue)
         var values: [String: CodexJSONValue] = [
             "threadId": .string(threadID),
             "input": .array([
@@ -592,7 +604,8 @@ public actor CodexAppServerClient {
         userPrompt: String,
         model: String,
         thinkingMode: ThinkingMode,
-        intent: EditIntent
+        intent: EditIntent,
+        onPartialText: (@Sendable (String) -> Void)? = nil
     ) async throws -> TurnResult {
         try await ensureStarted()
         let threadResult = try await request(
@@ -615,7 +628,10 @@ public actor CodexAppServerClient {
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                activeTurns[threadID] = ActiveTurn(continuation: continuation)
+                activeTurns[threadID] = ActiveTurn(
+                    continuation: continuation,
+                    onPartialText: onPartialText
+                )
                 Task { [weak self] in
                     await self?.startTurn(threadID: threadID, parameters: parameters)
                 }
@@ -928,7 +944,15 @@ public actor CodexAppServerClient {
         case "item/agentMessage/delta":
             guard let delta = params["delta"]?.stringValue,
                   var turn = activeTurns[threadID] else { return }
+            turn.firstOutputAt = turn.firstOutputAt ?? Date()
             turn.streamedText += delta
+            if let onPartialText = turn.onPartialText,
+               let partial = PartialStructuredCorrection.correctedText(
+                   from: turn.streamedText
+               ), partial != turn.partialText {
+                turn.partialText = partial
+                onPartialText(partial)
+            }
             activeTurns[threadID] = turn
 
         case "item/completed":
@@ -938,6 +962,7 @@ public actor CodexAppServerClient {
                   var turn = activeTurns[threadID] else { return }
             let phase = item["phase"]?.stringValue
             if phase == nil || phase == "final_answer" {
+                turn.firstOutputAt = turn.firstOutputAt ?? Date()
                 turn.finalText = text
                 activeTurns[threadID] = turn
             }
@@ -973,7 +998,11 @@ public actor CodexAppServerClient {
                     return
                 }
                 activeTurn.continuation.resume(
-                    returning: TurnResult(text: text, usage: activeTurn.usage)
+                    returning: TurnResult(
+                        text: text,
+                        usage: activeTurn.usage,
+                        firstOutputAt: activeTurn.firstOutputAt
+                    )
                 )
             } else if status == "interrupted" {
                 activeTurn.continuation.resume(throwing: CancellationError())

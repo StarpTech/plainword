@@ -42,7 +42,7 @@ export const CONTEXT_NEVER = [
 
 export const PROVIDERS = [
   {
-    name: 'Ollama — fully local',
+    name: 'Ollama, fully local',
     text: 'Nothing leaves your Mac. No account, no API key.',
     icons: [{ src: 'https://cdn.simpleicons.org/ollama/242428', alt: 'Ollama' }],
   },
@@ -58,5 +58,39 @@ export const PROVIDERS = [
       { src: 'https://cdn.simpleicons.org/anthropic/242428', alt: 'Anthropic', small: true },
       { src: 'https://cdn.simpleicons.org/mistralai/242428', alt: 'Mistral', small: true },
     ],
+  },
+];
+
+/** The two models we point people at, one for each thing people optimise for. */
+export const RECOMMENDED_MODELS = [
+  {
+    id: 'local',
+    eyebrow: 'If nothing may leave the Mac',
+    name: 'Gemma 4 E2B',
+    via: 'Ollama',
+    text: 'Google\u2019s smallest Gemma 4, open weights, running on your own hardware. It is good at phrasing, at conversational replies and at the language you wrote in, which is most of what a writing assistant is asked to do.',
+    points: [
+      'Under 0.5s to a suggestion on a MacBook Pro',
+      'No account, no API key, works offline',
+      'Free to run, 7.2GB to download',
+    ],
+    setup: 'ollama pull gemma4:e2b',
+    mono: true,
+    accent: true,
+  },
+  {
+    id: 'hosted',
+    eyebrow: 'If privacy is not the constraint',
+    name: 'Gemini 2.5 Flash-Lite',
+    via: 'Any OpenAI-compatible key',
+    text: 'Clearly smarter than anything that fits on a laptop, and cheap enough that a month of writing costs less than a coffee. Your text goes to Google, so pick this for the writing you would not mind sending.',
+    points: [
+      'Better at long threads and awkward rewrites',
+      'Around $0.10 per million input tokens',
+      'Still fast enough to feel instant',
+    ],
+    setup: 'Paste your key under Models',
+    mono: false,
+    accent: false,
   },
 ];

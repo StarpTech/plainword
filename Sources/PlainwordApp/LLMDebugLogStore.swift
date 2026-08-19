@@ -10,6 +10,7 @@ struct LLMDebugLogEntry: Identifiable {
     }
 
     let request: LLMCallDebugRequest
+    var firstByteAt: Date?
     var completedAt: Date?
     var state: State
     var responseBody: String?
@@ -19,6 +20,11 @@ struct LLMDebugLogEntry: Identifiable {
 
     var duration: TimeInterval? {
         completedAt?.timeIntervalSince(request.startedAt)
+    }
+
+    /// How long the provider took to say anything at all.
+    var timeToFirstByte: TimeInterval? {
+        firstByteAt?.timeIntervalSince(request.startedAt)
     }
 }
 
@@ -39,6 +45,7 @@ final class LLMDebugLogStore: ObservableObject {
             entries.insert(
                 LLMDebugLogEntry(
                     request: request,
+                    firstByteAt: nil,
                     completedAt: nil,
                     state: .inProgress,
                     responseBody: nil,
@@ -49,6 +56,11 @@ final class LLMDebugLogStore: ObservableObject {
             if entries.count > maximumEntryCount {
                 entries.removeLast(entries.count - maximumEntryCount)
             }
+
+        case let .firstByte(id, at):
+            guard let index = entries.firstIndex(where: { $0.id == id }),
+                  entries[index].firstByteAt == nil else { return }
+            entries[index].firstByteAt = at
 
         case let .succeeded(id, completedAt, statusCode, responseBody, tokenUsage):
             guard let index = entries.firstIndex(where: { $0.id == id }) else { return }

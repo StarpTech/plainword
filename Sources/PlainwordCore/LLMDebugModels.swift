@@ -65,6 +65,9 @@ public struct LLMTokenUsage: Equatable, Sendable {
 
 public enum LLMCallDebugEvent: Equatable, Sendable {
     case started(LLMCallDebugRequest)
+    /// The moment the provider's first response byte arrived, which is what separates a
+    /// slow model from a slow connection. Only sent by transports that can observe it.
+    case firstByte(id: UUID, at: Date)
     case succeeded(
         id: UUID,
         completedAt: Date,

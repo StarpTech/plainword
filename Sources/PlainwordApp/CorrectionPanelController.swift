@@ -1,6 +1,7 @@
 import AppKit
 import PlainwordCore
 import SwiftUI
+import os
 
 enum SuggestionPresentationMode: Equatable {
     case sourceOverlay
@@ -11,6 +12,31 @@ private enum CorrectionPresentationMetrics {
     static let maximumChipCount = 6
     static let chipSpacing: CGFloat = 7
     static let previewHeaderHeight: CGFloat = 22
+}
+
+/// Geometry of the expanded context receipt.
+///
+/// The panel reserves its height before SwiftUI lays it out, so both sides measure it
+/// from here and the section is pinned to the same value when it renders.
+private enum ContextReceiptMetrics {
+    static let verticalPadding: CGFloat = 10
+    static let rowHeight: CGFloat = 22
+    static let rowSpacing: CGFloat = 3
+    static let captionHeight: CGFloat = 14
+    static let controlRowHeight: CGFloat = 22
+    static let sectionSpacing: CGFloat = 7
+
+    /// Depends only on how much was found, never on the switch — so flipping it moves
+    /// nothing on screen.
+    static func height(forItemCount count: Int) -> CGFloat {
+        var height = verticalPadding * 2 + controlRowHeight
+        if count > 0 {
+            height += sectionSpacing + 1 + sectionSpacing
+                + CGFloat(count) * rowHeight
+                + CGFloat(count - 1) * rowSpacing
+        }
+        return height
+    }
 }
 
 private enum SuggestionPreviewMode: Equatable {
@@ -151,6 +177,13 @@ private final class CorrectionPanelModel: ObservableObject {
         var showsPromptBackButton = false
         var showsSuggestionBackButton = false
         var promptTitle = "Transform selection"
+        /// The prompt writes new text rather than changing text that is already there.
+        var isComposing = false
+        var contextReceipt: [ReadOnlyContextReceiptItem] = []
+        var isContextReceiptExpanded = false
+        var contextApplicationName = ""
+        var isContextSendingEnabled = false
+        var contextWasSentWithSuggestion = false
     }
 
     enum Phase: Equatable {
@@ -178,6 +211,25 @@ private final class CorrectionPanelModel: ObservableObject {
     var showsPromptButton: Bool { state.showsPromptButton }
     var showsPromptBackButton: Bool { state.showsPromptBackButton }
     var promptTitle: String { state.promptTitle }
+    var isComposing: Bool { state.isComposing }
+    var contextReceipt: [ReadOnlyContextReceiptItem] { state.contextReceipt }
+    var isContextReceiptExpanded: Bool { state.isContextReceiptExpanded }
+    var contextApplicationName: String { state.contextApplicationName }
+    var isContextSendingEnabled: Bool { state.isContextSendingEnabled }
+    var contextWasSentWithSuggestion: Bool { state.contextWasSentWithSuggestion }
+    var contextReceiptHeight: CGFloat {
+        ContextReceiptMetrics.height(forItemCount: state.contextReceipt.count)
+    }
+    /// The receipt describes what a finished suggestion was given, so it only makes
+    /// sense once there is a suggestion on screen.
+    ///
+    /// It stays available when nothing was read, because that is the only place the
+    /// switch below it lives — hiding it would make turning reading back on impossible
+    /// without a trip to Settings.
+    var showsContextReceipt: Bool {
+        !state.contextApplicationName.isEmpty
+            && (state.phase == .ready || state.phase == .streaming)
+    }
     var showsBackButton: Bool {
         state.showsPromptBackButton || state.showsSuggestionBackButton
     }
@@ -199,17 +251,26 @@ private final class CorrectionPanelModel: ObservableObject {
         )
     }
 
+    /// Keeps the content that is already on screen while taking on the controls a
+    /// finished suggestion needs, so a streamed answer is not torn down and rebuilt.
+    func adopt(showsPromptButton: Bool, showsBackButton: Bool) {
+        state.showsPromptButton = showsPromptButton
+        state.showsSuggestionBackButton = showsBackButton
+    }
+
     func beginPrompt(
         pointerEdge: ProposalPointerEdge,
         showsBackButton: Bool,
-        title: String
+        title: String,
+        isComposing: Bool = false
     ) {
         state = State(
             pointerEdge: pointerEdge,
             phase: .prompting,
             contentGeneration: state.contentGeneration &+ 1,
             showsPromptBackButton: showsBackButton,
-            promptTitle: title
+            promptTitle: title,
+            isComposing: isComposing
         )
     }
 
@@ -222,7 +283,7 @@ private final class CorrectionPanelModel: ObservableObject {
     }
 
     func beginPromptTriggerLoading() {
-        transition(to: .promptTriggerLoading)
+        transition(to: .promptTriggerLoading, correctedText: "")
     }
 
     func setPromptText(_ promptText: String) {
@@ -254,13 +315,52 @@ private final class CorrectionPanelModel: ObservableObject {
             showsPromptButton: state.showsPromptButton,
             showsPromptBackButton: state.showsPromptBackButton,
             showsSuggestionBackButton: state.showsSuggestionBackButton,
-            promptTitle: state.promptTitle
+            promptTitle: state.promptTitle,
+            isComposing: state.isComposing,
+            contextReceipt: state.contextReceipt,
+            isContextReceiptExpanded: state.isContextReceiptExpanded,
+            contextApplicationName: state.contextApplicationName,
+            isContextSendingEnabled: state.isContextSendingEnabled,
+            contextWasSentWithSuggestion: state.contextWasSentWithSuggestion
         )
         let changes = { self.state = nextState }
         if animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             withAnimation(.smooth(duration: 0.18), changes)
         } else {
             changes()
+        }
+    }
+
+    func setContextReceipt(
+        _ contextReceipt: [ReadOnlyContextReceiptItem],
+        applicationName: String,
+        isSendingEnabled: Bool,
+        wasSentWithSuggestion: Bool
+    ) {
+        state.contextReceipt = contextReceipt
+        state.contextApplicationName = applicationName
+        state.isContextSendingEnabled = isSendingEnabled
+        state.contextWasSentWithSuggestion = wasSentWithSuggestion
+        state.isContextReceiptExpanded = false
+    }
+
+    func setContextSendingEnabled(_ isEnabled: Bool) {
+        guard state.isContextSendingEnabled != isEnabled else { return }
+        let changes = { self.state.isContextSendingEnabled = isEnabled }
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            changes()
+        } else {
+            withAnimation(.smooth(duration: 0.18), changes)
+        }
+    }
+
+    func setContextReceiptExpanded(_ isExpanded: Bool) {
+        guard state.isContextReceiptExpanded != isExpanded else { return }
+        let changes = { self.state.isContextReceiptExpanded = isExpanded }
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            changes()
+        } else {
+            withAnimation(.smooth(duration: 0.18), changes)
         }
     }
 
@@ -325,6 +425,7 @@ final class CorrectionPanelController {
     private var onBack: (() -> Void)?
     private var onRequestPrompt: (() -> Void)?
     private var onSubmitPrompt: ((String) -> Void)?
+    private var onSetContextSendingEnabled: ((Bool) -> Void)?
     private var targetFrame: NSRect?
     private var userPositionedOrigin: NSPoint?
     private var streamingResizeTask: Task<Void, Never>?
@@ -347,6 +448,12 @@ final class CorrectionPanelController {
                     },
                     onPreviewModeChange: { [weak self] previewMode in
                         self?.updatePreviewMode(previewMode)
+                    },
+                    onToggleContextReceipt: { [weak self] in
+                        self?.toggleContextReceipt()
+                    },
+                    onSetContextSendingEnabled: { [weak self] isEnabled in
+                        self?.setContextSendingEnabled(isEnabled)
                     },
                     onDrag: { [weak self] origin in
                         self?.movePanel(to: origin)
@@ -379,7 +486,16 @@ final class CorrectionPanelController {
         panel.hidesOnDeactivate = false
         panel.animationBehavior = .none
         panel.becomesKeyOnlyIfNeeded = true
+        // Tooltips are driven by mouse-moved tracking. This panel floats over another
+        // application while Plainword is in the background, so it has to opt in or the
+        // pointer is only ever heard from on a click.
+        panel.acceptsMouseMovedEvents = true
         panel.contentView = hostingView
+        // A zero-sized window proposes nothing to lay out against, so SwiftUI's first
+        // pass measures the content at its ideal width, which for a line of text is far
+        // wider than the panel ever becomes. Start at the ordinary proposal size so that
+        // first pass is already close to what appears.
+        panel.setContentSize(NSSize(width: regularPanelWidth, height: 200))
     }
 
     func showProcessing(
@@ -404,11 +520,16 @@ final class CorrectionPanelController {
     func showSuggestion(
         _ suggestion: WritingSuggestion,
         presentation: SuggestionPresentationMode,
+        contextReceipt: [ReadOnlyContextReceiptItem] = [],
+        contextApplicationName: String = "",
+        isContextSendingEnabled: Bool = false,
+        contextWasSentWithSuggestion: Bool = false,
         near anchor: CGRect,
         onAccept: @escaping () -> Void,
         onDismiss: @escaping () -> Void,
         onBack: (() -> Void)? = nil,
-        onRequestPrompt: @escaping () -> Void
+        onRequestPrompt: @escaping () -> Void,
+        onSetContextSendingEnabled: ((Bool) -> Void)? = nil
     ) {
         let shouldAnimateResize = panel.isVisible
         self.onAccept = onAccept
@@ -416,11 +537,30 @@ final class CorrectionPanelController {
         self.onBack = onBack
         self.onRequestPrompt = onRequestPrompt
         self.onSubmitPrompt = nil
+        self.onSetContextSendingEnabled = onSetContextSendingEnabled
         cancelScheduledStreamingResize()
-        model.begin(
-            pointerEdge: verticalPlacement.pointerEdge,
-            showsPromptButton: true,
-            showsBackButton: onBack != nil
+        // Text that streamed in is already the answer. Settling it in place reads as the
+        // same result gaining its controls, so it is adopted rather than replaced.
+        if model.phase == .streaming {
+            model.adopt(
+                showsPromptButton: suggestion.kind != .composition,
+                showsBackButton: onBack != nil
+            )
+        } else {
+            model.begin(
+                pointerEdge: verticalPlacement.pointerEdge,
+                // A draft is not in the field yet, so there is nothing there to
+                // transform. Once it is inserted the ordinary transform shortcut
+                // reaches it.
+                showsPromptButton: suggestion.kind != .composition,
+                showsBackButton: onBack != nil
+            )
+        }
+        model.setContextReceipt(
+            contextReceipt,
+            applicationName: contextApplicationName,
+            isSendingEnabled: isContextSendingEnabled,
+            wasSentWithSuggestion: contextWasSentWithSuggestion
         )
         model.transition(
             to: .ready,
@@ -440,6 +580,7 @@ final class CorrectionPanelController {
     func showPrompt(
         near anchor: CGRect,
         title: String,
+        isComposing: Bool = false,
         onSubmit: @escaping (String) -> Void,
         onBack: (() -> Void)? = nil,
         onDismiss: @escaping () -> Void
@@ -453,7 +594,8 @@ final class CorrectionPanelController {
         model.beginPrompt(
             pointerEdge: verticalPlacement.pointerEdge,
             showsBackButton: onBack != nil,
-            title: title
+            title: title,
+            isComposing: isComposing
         )
         configurePlacement(near: anchor)
         model.setPointerEdge(verticalPlacement.pointerEdge)
@@ -482,6 +624,9 @@ final class CorrectionPanelController {
     }
 
     func showPromptTriggerLoading() {
+        // A restarted review comes back here from whatever its predecessor had already
+        // streamed, so the text it left goes with it rather than sizing the marker.
+        cancelScheduledStreamingResize()
         model.beginPromptTriggerLoading()
         targetFrame = nil
         resizeForContent(animated: true)
@@ -504,10 +649,29 @@ final class CorrectionPanelController {
         resizeForContent(animated: true)
     }
 
+    /// The switch records a preference. It issues no request, does not disturb the
+    /// suggestion on screen, and does not change the panel's size — nothing moves.
+    private func setContextSendingEnabled(_ isEnabled: Bool) {
+        model.setContextSendingEnabled(isEnabled)
+        onSetContextSendingEnabled?(isEnabled)
+    }
+
+    private func toggleContextReceipt() {
+        model.setContextReceiptExpanded(!model.isContextReceiptExpanded)
+        targetFrame = nil
+        // Matches the 0.18s content animation in the model, so the panel and the section
+        // inside it grow together instead of the frame snapping ahead of the rows.
+        resizeForContent(animated: true)
+    }
+
     func restoreVisibility() {
         visibilityGeneration += 1
         panel.alphaValue = 1
+        // A suspended panel keeps answering resizes it cannot draw, so settle the
+        // layout before it comes back rather than letting the stale size show.
+        settleContentLayout()
         panel.orderFrontRegardless()
+        panel.invalidateShadow()
     }
 
     /// Removes the panel from the global window stack while preserving its state.
@@ -541,6 +705,12 @@ final class CorrectionPanelController {
             animated: isEnteringStreaming
         )
         if isEnteringStreaming {
+            // A review starts as a small marker, and a transform as a single line. The
+            // side of the field that fit either one may not fit a growing answer, so the
+            // panel picks its side again the moment text starts arriving.
+            configurePlacement(near: anchor)
+            model.setPointerEdge(verticalPlacement.pointerEdge)
+            targetFrame = nil
             resizeForContent(animated: true)
         } else {
             scheduleStreamingResize()
@@ -651,7 +821,12 @@ final class CorrectionPanelController {
                 panel.animator().setFrame(frame, display: true)
             }
         } else {
+            // Frames set while the panel is hidden must not pick up an implicit layer
+            // animation, or the resize plays out the moment the panel is ordered in.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             panel.setFrame(frame, display: true)
+            CATransaction.commit()
         }
     }
 
@@ -702,10 +877,15 @@ final class CorrectionPanelController {
     private func presentPanel(makeKey: Bool = false) {
         visibilityGeneration += 1
         let reducesMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let isFirstAppearance = !panel.isVisible
         if reducesMotion {
             panel.alphaValue = 1
-        } else if !panel.isVisible {
+        } else if isFirstAppearance {
             panel.alphaValue = 0
+        }
+
+        if isFirstAppearance {
+            settleContentLayout()
         }
 
         // A global shortcut leaves the source application active. Unlike
@@ -716,13 +896,31 @@ final class CorrectionPanelController {
         if makeKey {
             panel.makeKey()
         }
+        // The shadow is traced from what the panel draws. Ordering in with a shadow
+        // cached from an earlier size would show a larger shape around the panel.
+        panel.invalidateShadow()
 
         guard !reducesMotion else { return }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.14
-            context.allowsImplicitAnimation = true
+            // Only the fade belongs to this group. Implicit animation here would also
+            // catch the content's own first layout and play it out as a resize.
             panel.animator().alphaValue = 1
         }
+    }
+
+    /// Draws the content at its final size before the panel is ordered in.
+    ///
+    /// A hidden window lays out lazily, so the first frame after ordering in can still
+    /// carry the geometry SwiftUI last settled on. Flushing layout and drawing while the
+    /// panel is invisible means what appears is already the right shape, instead of a
+    /// larger one shrinking into place.
+    private func settleContentLayout() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        hostingView.layoutSubtreeIfNeeded()
+        panel.displayIfNeeded()
+        CATransaction.commit()
     }
 
     private struct PanelLayout {
@@ -743,7 +941,8 @@ final class CorrectionPanelController {
         case .promptTrigger, .promptTriggerLoading:
             contentHeight = 0
         case .prompting:
-            contentHeight = 108
+            // Composing drops the transform shortcuts, and with them their row.
+            contentHeight = model.isComposing ? 86 : 108
         case .processing, .unchanged:
             contentHeight = 40
         case .streaming:
@@ -758,7 +957,10 @@ final class CorrectionPanelController {
             || model.phase == .processing
             || model.phase == .streaming
             || model.phase == .ready ? 53 : 0
-        let naturalHeight = pointerHeight + 43 + 1 + contentHeight + footerHeight
+        let naturalHeight = pointerHeight + 43 + 1
+            + contentHeight
+            + contextReceiptHeight
+            + footerHeight
         let height = min(
             ceil(naturalHeight),
             maximumPanelHeight,
@@ -773,6 +975,13 @@ final class CorrectionPanelController {
 
     private var targetSize: NSSize {
         targetLayout.size
+    }
+
+    private var contextReceiptHeight: CGFloat {
+        guard model.showsContextReceipt, model.isContextReceiptExpanded else { return 0 }
+        // The separator above the section belongs to it, since both appear together.
+        // Same expression the section renders itself at, so the two cannot disagree.
+        return 1 + model.contextReceiptHeight
     }
 
     private var availablePanelHeight: CGFloat {
@@ -801,6 +1010,11 @@ final class CorrectionPanelController {
             )
         case .rewrite:
             return fallbackPreviewContentHeight(for: suggestion)
+        case .composition:
+            return 46 + measuredTextHeight(
+                suggestion.replacementText,
+                lineSpacing: 2
+            )
         }
     }
 
@@ -894,7 +1108,7 @@ final class CorrectionPanelController {
         case .completion:
             minimumWidth = compactPanelWidth
             text = suggestion.changes.first?.replacement ?? suggestion.replacementText
-        case .correction, .rewrite:
+        case .correction, .rewrite, .composition:
             minimumWidth = regularPanelWidth
             text = suggestion.replacementText
         }
@@ -1044,6 +1258,117 @@ private final class CorrectionPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+/// Text that draws itself in while the rest of it is still on its way.
+///
+/// Providers send an answer in uneven bursts, so text that appeared the instant each
+/// burst landed would jump and then sit still. This reveals what has arrived at a pace
+/// of its own, keeps the newest few characters fading up behind a pulsing cursor, and
+/// catches up quickly whenever it falls behind, so the panel reads as writing rather
+/// than as waiting.
+private struct StreamingTextView: View {
+    let text: String
+    let isStreaming: Bool
+
+    /// What the reveal is working towards.
+    ///
+    /// The ticker below keeps the view value it was created with, so it cannot see
+    /// `text` grow: reading it there would freeze the reveal on the first fragment that
+    /// arrived. State is read through shared storage instead, which stays current, so
+    /// each arrival is carried across in here.
+    private struct Pacing: Equatable {
+        var targetCount = 0
+        var isRevealing = false
+    }
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var revealedCount = 0
+    @State private var caretPhase: Double = 0
+    @State private var pacing = Pacing()
+    @State private var revealFrames = 0
+
+    /// How many characters at the end are still fading up.
+    private static let fadeLength = 5
+    private static let frameInterval: Double = 1.0 / 30
+    private static let caretPeriod: Double = 1.1
+
+    var body: some View {
+        rendered
+            .font(.system(size: 13))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onChange(
+                of: Pacing(
+                    targetCount: text.count,
+                    isRevealing: isStreaming && !reduceMotion
+                ),
+                initial: true
+            ) { _, next in
+                pacing = next
+                // Text that is not being drawn in, and text that shrank because a
+                // request started over, is simply shown as it stands.
+                if !next.isRevealing || revealedCount > next.targetCount {
+                    revealedCount = next.targetCount
+                }
+            }
+            .task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(Self.frameInterval))
+                    advance()
+                }
+            }
+            .accessibilityLabel(text)
+    }
+
+    private var rendered: Text {
+        guard isStreaming else { return Text(text) }
+        guard !reduceMotion else { return Text(text) + caret }
+
+        let revealed = String(text.prefix(max(revealedCount, 0)))
+        // The trail belongs to text that is still being drawn in. Once the panel has
+        // caught up with what arrived, every character it shows is settled.
+        guard revealed.count < text.count else { return Text(revealed) + caret }
+
+        let fadeLength = min(Self.fadeLength, revealed.count)
+        var composed = Text(String(revealed.dropLast(fadeLength)))
+        for (offset, character) in revealed.suffix(fadeLength).enumerated() {
+            let opacity = 1 - Double(offset + 1) / Double(fadeLength + 1)
+            composed = composed + Text(String(character))
+                .foregroundStyle(PlainwordTheme.textPrimary.opacity(opacity))
+        }
+        return composed + caret
+    }
+
+    private var caret: Text {
+        let pulse = reduceMotion
+            ? 1
+            : 0.3 + 0.7 * (0.5 + 0.5 * cos(caretPhase * 2 * .pi / Self.caretPeriod))
+        return Text(" \u{258D}")
+            .foregroundStyle(PlainwordTheme.accent.opacity(pulse))
+    }
+
+    private func advance() {
+        let pacing = self.pacing
+        guard pacing.isRevealing else { return }
+        // TEMPORARY reveal diagnostics.
+        if revealedCount < pacing.targetCount {
+            revealFrames += 1
+        } else if revealFrames > 0 {
+            os_log(
+                "reveal caught up: %{public}d chars in %{public}d frames",
+                revealedCount,
+                revealFrames
+            )
+            revealFrames = 0
+        }
+        if revealedCount < pacing.targetCount {
+            // A sixth of what is left each frame: quick when a large burst lands, and
+            // gentle over the last few characters.
+            revealedCount += max(1, (pacing.targetCount - revealedCount) / 6)
+        }
+        caretPhase = (caretPhase + Self.frameInterval)
+            .truncatingRemainder(dividingBy: Self.caretPeriod)
+    }
+}
+
 private struct PlainwordLoadingMark: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isAnimating = false
@@ -1097,6 +1422,8 @@ private struct CrossAppProposalView: View {
     let onRequestPrompt: () -> Void
     let onSubmitPrompt: (String) -> Void
     let onPreviewModeChange: (SuggestionPreviewMode) -> Void
+    let onToggleContextReceipt: () -> Void
+    let onSetContextSendingEnabled: (Bool) -> Void
     let onDrag: (NSPoint) -> Void
     @FocusState private var promptFocused: Bool
     @State private var hoveredTransformShortcut: TransformShortcut?
@@ -1300,16 +1627,14 @@ private struct CrossAppProposalView: View {
 
     private var promptContent: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(
-                model.showsPromptBackButton
-                    ? "How should this version change?"
-                    : "How should this text change?"
-            )
+            Text(promptCaption)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(PlainwordTheme.textSecondary)
 
             TextField(
-                "Make it shorter, friendlier, translate it…",
+                model.isComposing
+                    ? "A reply saying I am running late…"
+                    : "Make it shorter, friendlier, translate it…",
                 text: Binding(
                     get: { model.promptText },
                     set: { model.setPromptText($0) }
@@ -1335,31 +1660,35 @@ private struct CrossAppProposalView: View {
                     )
             }
 
-            HStack(spacing: 5) {
-                ForEach(TransformShortcut.allCases) { shortcut in
-                    Button(shortcut.title) {
-                        onSubmitPrompt(shortcut.instruction)
+            // The shortcuts change text that is already there, so composing has
+            // nothing for them to act on.
+            if !model.isComposing {
+                HStack(spacing: 5) {
+                    ForEach(TransformShortcut.allCases) { shortcut in
+                        Button(shortcut.title) {
+                            onSubmitPrompt(shortcut.instruction)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(PlainwordTheme.textSecondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            hoveredTransformShortcut == shortcut
+                                ? PlainwordTheme.hoverSurface
+                                : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .stroke(PlainwordTheme.strongSeparator, lineWidth: 1)
+                        }
+                        .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .onHover { isHovering in
+                            hoveredTransformShortcut = isHovering ? shortcut : nil
+                        }
+                        .accessibilityHint("Transforms the selected text immediately")
                     }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(PlainwordTheme.textSecondary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(
-                        hoveredTransformShortcut == shortcut
-                            ? PlainwordTheme.hoverSurface
-                            : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .stroke(PlainwordTheme.strongSeparator, lineWidth: 1)
-                    }
-                    .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                    .onHover { isHovering in
-                        hoveredTransformShortcut = isHovering ? shortcut : nil
-                    }
-                    .accessibilityHint("Transforms the selected text immediately")
                 }
             }
         }
@@ -1369,6 +1698,15 @@ private struct CrossAppProposalView: View {
         .onAppear {
             DispatchQueue.main.async { promptFocused = true }
         }
+    }
+
+    private var promptCaption: String {
+        if model.isComposing {
+            return "What should Plainword write?"
+        }
+        return model.showsPromptBackButton
+            ? "How should this version change?"
+            : "How should this text change?"
     }
 
     private var promptingContent: some View {
@@ -1409,9 +1747,126 @@ private struct CrossAppProposalView: View {
                 .fill(PlainwordTheme.separator)
                 .frame(height: 1)
 
+            if model.showsContextReceipt, model.isContextReceiptExpanded {
+                contextReceiptSection
+                Rectangle()
+                    .fill(PlainwordTheme.separator)
+                    .frame(height: 1)
+            }
+
             footer
         }
         .frame(maxHeight: .infinity)
+    }
+
+    private var contextReceiptSection: some View {
+        VStack(alignment: .leading, spacing: ContextReceiptMetrics.sectionSpacing) {
+            // The decision comes first. The list below is what it decides about, which
+            // makes it the explanation — so no sentence has to be one.
+            contextSendingSwitch
+
+            if !model.contextReceipt.isEmpty {
+                Rectangle()
+                    .fill(PlainwordTheme.separator)
+                    .frame(height: 1)
+
+                VStack(alignment: .leading, spacing: ContextReceiptMetrics.rowSpacing) {
+                    ForEach(model.contextReceipt) { receiptRow($0) }
+                }
+                // Dimmed when this suggestion was not given them, so the difference
+                // between "available" and "used" is visible rather than explained.
+                .opacity(model.contextWasSentWithSuggestion ? 1 : 0.5)
+            }
+
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, ContextReceiptMetrics.verticalPadding)
+        // Pinned to the height the panel reserved, so the rows never spill out of the
+        // frame while it animates open.
+        .frame(
+            maxWidth: .infinity,
+            minHeight: model.contextReceiptHeight,
+            maxHeight: model.contextReceiptHeight,
+            alignment: .topLeading
+        )
+        .background(PlainwordTheme.raisedSurface)
+        .transition(.opacity.combined(with: .offset(y: 4)))
+    }
+
+    /// Switching this sends nothing and changes nothing about the suggestion on screen.
+    /// It decides whether the next one is given what the list above shows.
+    private var contextSendingSwitch: some View {
+        Toggle(isOn: Binding(
+            get: { model.isContextSendingEnabled },
+            set: { onSetContextSendingEnabled($0) }
+        )) {
+            Text("Attach context from \(model.contextApplicationName)")
+                .font(.system(size: 11))
+                .foregroundStyle(PlainwordTheme.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .toggleStyle(.switch)
+        .controlSize(.small)
+        .tint(PlainwordTheme.accent)
+        .frame(height: ContextReceiptMetrics.controlRowHeight)
+        .hoverTip("""
+        Attach what Plainword found here to your next suggestion.
+        Applies to \(model.contextApplicationName) only.
+        """)
+        .accessibilityHint(
+            "Decides whether your next suggestion in this application has the text found around this field attached"
+        )
+    }
+
+    private func receiptCaption(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10))
+            .foregroundStyle(PlainwordTheme.textSecondary)
+            .lineLimit(1)
+            .frame(height: ContextReceiptMetrics.captionHeight, alignment: .leading)
+    }
+
+    private func receiptRow(_ item: ReadOnlyContextReceiptItem) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: receiptSymbol(for: item.category))
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(PlainwordTheme.textSecondary)
+                .frame(width: 13)
+
+            Text(item.title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(PlainwordTheme.textSecondary)
+                .lineLimit(1)
+                .frame(width: 72, alignment: .leading)
+
+            Text(item.detail)
+                .font(.system(size: 11))
+                .foregroundStyle(PlainwordTheme.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: 0)
+        }
+        .frame(height: ContextReceiptMetrics.rowHeight)
+        // The whole row answers the hover, not just the glyphs in it.
+        .contentShape(Rectangle())
+        // A row shows one line; hovering shows the whole value it stands for.
+        .hoverTip("\(item.title): \(item.detail)")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(item.title): \(item.detail)")
+    }
+
+    private func receiptSymbol(
+        for category: ReadOnlyContextReceiptItem.Category
+    ) -> String {
+        switch category {
+        case .application: "app.dashed"
+        case .field: "character.cursor.ibeam"
+        case .document: "doc.text"
+        case .nearbyText: "text.alignleft"
+        case .surroundingText: "text.insert"
+        }
     }
 
     @ViewBuilder
@@ -1420,10 +1875,12 @@ private struct CrossAppProposalView: View {
             suggestionDetails(suggestion)
                 .padding(13)
         } else {
-            Text(model.correctedText + (model.phase == .streaming ? " ▍" : ""))
-                .font(.system(size: 13))
-                .padding(13)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            StreamingTextView(
+                text: model.correctedText,
+                isStreaming: model.phase == .streaming
+            )
+            .padding(13)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -1438,6 +1895,10 @@ private struct CrossAppProposalView: View {
                 text: suggestion.changes.first?.replacement ?? suggestion.replacementText,
                 emphasized: true
             )
+        case .composition:
+            // Nothing was replaced, so there is no diff to offer: the draft is the
+            // whole result.
+            labeledText("Draft", text: suggestion.replacementText)
         case .correction, .rewrite:
             fallbackPreview(suggestion)
         }
@@ -1555,18 +2016,22 @@ private struct CrossAppProposalView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             if model.phase == .prompting {
-                Text("↩ to transform")
-                    .font(.system(size: 10))
-                    .foregroundStyle(PlainwordTheme.textSecondary)
                 Spacer(minLength: 8)
-                Button(
-                    model.showsPromptBackButton ? "Back" : "Cancel",
-                    action: model.showsPromptBackButton ? onBack : onDismiss
-                )
+                Button(action: model.showsPromptBackButton ? onBack : onDismiss) {
+                    PlainwordShortcutLabel(
+                        model.showsPromptBackButton ? "Back" : "Cancel",
+                        shortcut: "esc"
+                    )
+                }
                     .buttonStyle(PlainwordButtonStyle())
                     .keyboardShortcut(.cancelAction)
-                Button("Transform") {
+                Button {
                     onSubmitPrompt(model.promptText)
+                } label: {
+                    PlainwordShortcutLabel(
+                        model.isComposing ? "Write" : "Transform",
+                        shortcut: "↩"
+                    )
                 }
                 .buttonStyle(PlainwordButtonStyle(.primary))
                 .keyboardShortcut(.return, modifiers: [])
@@ -1579,11 +2044,13 @@ private struct CrossAppProposalView: View {
                 Button("Cancel", action: onDismiss)
                     .buttonStyle(PlainwordButtonStyle())
             } else {
-                Text("⌘↩ to apply")
-                    .font(.system(size: 10))
-                    .foregroundStyle(PlainwordTheme.textSecondary)
+                if model.showsContextReceipt {
+                    contextReceiptToggle
+                }
                 Spacer(minLength: 8)
-                Button("Dismiss", action: onDismiss)
+                Button(action: onDismiss) {
+                    PlainwordShortcutLabel("Dismiss", shortcut: "esc")
+                }
                     .buttonStyle(PlainwordButtonStyle())
                     .keyboardShortcut(.cancelAction)
                 if model.phase == .ready, model.showsBackButton {
@@ -1591,7 +2058,9 @@ private struct CrossAppProposalView: View {
                         .buttonStyle(PlainwordButtonStyle())
                 }
                 if model.phase == .ready {
-                    Button(acceptTitle, action: onAccept)
+                    Button(action: onAccept) {
+                        PlainwordShortcutLabel(acceptTitle, shortcut: "⌘↩")
+                    }
                         .buttonStyle(PlainwordButtonStyle(.primary))
                         .keyboardShortcut(.return, modifiers: [.command])
                         .accessibilityHint("Press Command-Return to apply")
@@ -1601,6 +2070,43 @@ private struct CrossAppProposalView: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 12)
         .frame(height: 52)
+    }
+
+    private var contextReceiptToggle: some View {
+        Button(action: onToggleContextReceipt) {
+            Image(systemName: "paperclip")
+                .font(.system(size: 11, weight: .medium))
+                .rotationEffect(.degrees(model.isContextReceiptExpanded ? -20 : 0))
+                .frame(width: 22, height: 22)
+                .background(
+                    model.isContextSendingEnabled
+                        ? PlainwordTheme.accentMuted
+                        : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(
+            model.isContextSendingEnabled
+                ? PlainwordTheme.accent
+                : PlainwordTheme.textSecondary
+        )
+        .hoverTip("""
+        \(ReadOnlyContextReceipt.summary(
+                forItemCount: model.contextReceipt.count,
+                wasAttached: model.contextWasSentWithSuggestion
+            ))
+        Only this window. Never password fields.
+        """)
+        .accessibilityLabel("Attached context")
+        .accessibilityValue(
+            ReadOnlyContextReceipt.summary(
+                forItemCount: model.contextReceipt.count,
+                wasAttached: model.contextWasSentWithSuggestion
+            )
+        )
+        .accessibilityHint("Shows what Plainword found around this field")
     }
 
     private var headerTitle: String {
@@ -1619,6 +2125,7 @@ private struct CrossAppProposalView: View {
                     : "Small corrections"
             case .completion: "Finish your thought"
             case .rewrite: "Clarity suggestion"
+            case .composition: "Draft"
             case .none: "Suggestion"
             }
         case .unchanged: "Looks good"
@@ -1635,6 +2142,8 @@ private struct CrossAppProposalView: View {
             return "Completion"
         case .rewrite:
             return "1 rewrite"
+        case .composition:
+            return "New text"
         }
     }
 
@@ -1649,6 +2158,8 @@ private struct CrossAppProposalView: View {
             return "Finish"
         case .rewrite:
             return "Use suggestion"
+        case .composition:
+            return "Insert"
         }
     }
 

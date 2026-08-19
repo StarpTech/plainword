@@ -455,7 +455,7 @@ final class SettingsStore: ObservableObject {
 
     func streamCorrection(
         _ text: String
-    ) throws -> AsyncThrowingStream<CorrectionResponse, Error> {
+    ) throws -> AsyncThrowingStream<CorrectionStreamEvent, Error> {
         guard isLLMConfigured else {
             throw DesktopCorrectionError.providerNotConfigured
         }
@@ -483,7 +483,7 @@ final class SettingsStore: ObservableObject {
         intent: EditIntent,
         locale: String,
         instruction: String? = nil
-    ) throws -> AsyncThrowingStream<CorrectionResponse, Error> {
+    ) throws -> AsyncThrowingStream<CorrectionStreamEvent, Error> {
         guard isLLMConfigured else {
             throw DesktopCorrectionError.providerNotConfigured
         }

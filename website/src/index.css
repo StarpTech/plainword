@@ -1,23 +1,153 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+   Design tokens. Every colour, size, radius, shadow and easing used on the
+   site comes from here. Components should not invent one-off values.
+   --------------------------------------------------------------------------- */
 @theme {
-  --color-canvas: #f7f7f8;
-  --color-ink: #242428;
-  --color-ink-soft: #6f6f76;
-  --color-ink-faint: #929299;
-  --color-line: #e2e2e5;
+  /* Surfaces ------------------------------------------------------------- */
+  --color-canvas: #f6f6f8;
+  --color-surface: #ffffff;
+  --color-surface-sunken: #fafafb;
+
+  /* Ink ------------------------------------------------------------------ */
+  --color-ink: #1d1d21;
+  --color-ink-soft: #62626b;
+  --color-ink-faint: #8e8e97;
+
+  /* Lines ---------------------------------------------------------------- */
+  --color-line: #e6e6ea;
+  --color-line-strong: #d8d8e0;
+
+  /* Brand ---------------------------------------------------------------- */
   --color-brand: #6256c4;
   --color-brand-strong: #5045a8;
+  --color-brand-soft: #ddd8f6;
   --color-brand-muted: #eceaf8;
   --color-lavender: #c6aeff;
   --color-sky: #7dc8ff;
+
+  /* Type ----------------------------------------------------------------- */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  --text-2xs: 0.75rem;      /* 12: eyebrows, pills */
+  --text-2xs--line-height: 1.4;
+  --text-xs: 0.8125rem;     /* 13: captions, footer, chips */
+  --text-xs--line-height: 1.5;
+  --text-sm: 0.875rem;      /* 14: dense body, card text */
+  --text-sm--line-height: 1.65;
+  --text-base: 0.9375rem;   /* 15: default body */
+  --text-base--line-height: 1.7;
+  --text-md: 1.0625rem;     /* 17: card titles, section leads */
+  --text-md--line-height: 1.6;
+
+  --text-lead: clamp(1rem, 0.9rem + 0.5vw, 1.1875rem);
+  --text-lead--line-height: 1.6;
+
+  --text-h3: 1.0625rem;
+  --text-h3--line-height: 1.4;
+  --text-h3--letter-spacing: -0.01em;
+
+  --text-h2: clamp(1.625rem, 1.25rem + 1.6vw, 2.125rem);
+  --text-h2--line-height: 1.12;
+  --text-h2--letter-spacing: -0.025em;
+
+  --text-h1: clamp(1.875rem, 1.35rem + 2.2vw, 2.5rem);
+  --text-h1--line-height: 1.1;
+  --text-h1--letter-spacing: -0.028em;
+
+  --text-display: clamp(2.375rem, 1.3rem + 4.4vw, 3.75rem);
+  --text-display--line-height: 1.05;
+  --text-display--letter-spacing: -0.035em;
+
+  /* Radii, semantic so the same kind of thing is always the same shape ------ */
+  --radius-control: 10px;   /* buttons, kbd, small inputs */
+  --radius-tile: 12px;      /* icon tiles, list rows */
+  --radius-card: 16px;      /* cards, framed media */
+  --radius-panel: 24px;     /* large enclosing panels */
+
+  /* Elevation ------------------------------------------------------------ */
+  --shadow-card: 0 1px 2px rgb(29 29 33 / 0.04), 0 4px 14px rgb(29 29 33 / 0.05);
+  --shadow-card-lift: 0 2px 4px rgb(29 29 33 / 0.05), 0 16px 32px rgb(29 29 33 / 0.09);
+  --shadow-brand: 0 6px 20px rgb(98 86 196 / 0.28);
+  --shadow-brand-lift: 0 10px 28px rgb(98 86 196 / 0.38);
+  /* Filter-based, so they follow the alpha edge of transparent PNGs
+     instead of drawing a box around them. */
+  --drop-shadow-float: 0 18px 36px rgb(29 29 33 / 0.24);
+  --drop-shadow-float-lift: 0 24px 44px rgb(29 29 33 / 0.30);
+  --shadow-panel: 0 24px 64px rgb(29 29 33 / 0.26);
+  --shadow-nav: 0 1px 0 rgb(29 29 33 / 0.04);
+
+  /* Motion --------------------------------------------------------------- */
+  --ease-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --default-transition-timing-function: var(--ease-soft);
+  --default-transition-duration: 180ms;
+
+  --animate-drift: drift 22s var(--ease-soft) infinite alternate;
+  --animate-drift-slow: drift 30s var(--ease-soft) infinite alternate-reverse;
 }
 
-body {
-  @apply bg-canvas font-sans text-ink antialiased;
+@keyframes drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(2.5rem, -1.75rem, 0) scale(1.08); }
 }
 
-::selection {
-  @apply bg-brand-muted;
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 6rem;
+  }
+
+  body {
+    @apply bg-canvas font-sans text-base text-ink antialiased;
+    font-feature-settings: "kern", "liga", "cv11";
+  }
+
+  ::selection {
+    @apply bg-brand-muted text-brand-strong;
+  }
+
+  /* One focus treatment for the whole site. */
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 3px;
+    border-radius: 6px;
+  }
+}
+
+@layer components {
+  /* Scroll reveal. The visible state is driven by IntersectionObserver
+     in <Reveal>, so the transition is declared once here. */
+  .reveal {
+    opacity: 0;
+    transform: translateY(14px);
+    transition:
+      opacity 0.6s var(--ease-soft),
+      transform 0.6s var(--ease-soft);
+  }
+
+  .reveal[data-visible="true"] {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .reveal {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

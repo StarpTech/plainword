@@ -1,16 +1,18 @@
 import { Cpu, MessagesSquare, WandSparkles } from 'lucide-react';
 import { APP_CHIPS } from '../content.js';
+import Reveal from './Reveal.jsx';
+import { Section, SectionHeading } from './Section.jsx';
 
 const FEATURES = [
   {
     icon: WandSparkles,
     title: 'Writes in your tone and style',
-    text: 'Pick a tone and style, add standing instructions like \u201CBritish English, no semicolons\u201D, and every suggestion follows them. Or type a one-off instruction and run it again until it fits.',
+    text: 'Pick a tone and style, add standing instructions like “British English, no semicolons”, and every suggestion follows them. Or type a one-off instruction and run it again until it fits.',
   },
   {
     icon: MessagesSquare,
     title: 'Uses the text around your cursor',
-    text: 'A reply in a thread is edited as a reply, not as an isolated sentence. Plainword reads the box you\u2019re writing in, its label and the part of the window just above it \u2014 never the rest of your screen.',
+    text: 'A reply in a thread is edited as a reply, not as an isolated sentence. Plainword reads the box you’re writing in, its label and the part of the window just above it, never the rest of your screen.',
   },
   {
     icon: Cpu,
@@ -19,46 +21,48 @@ const FEATURES = [
   },
 ];
 
-function FeatureCard({ icon: Icon, title, text }) {
+function FeatureCard({ icon: Icon, title, text, delay }) {
   return (
-    <div className="rounded-2xl border border-line bg-white p-7">
-      <div className="mb-4.5 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-brand-muted to-[#e2defa]">
+    <Reveal
+      delay={delay}
+      className="group rounded-card border border-line bg-surface p-7 shadow-card transition-all duration-300 hover:-translate-y-1 hover:border-brand-soft hover:shadow-card-lift"
+    >
+      <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-tile bg-gradient-to-br from-brand-muted to-brand-soft transition-transform duration-300 group-hover:scale-110">
         <Icon className="h-[22px] w-[22px] text-brand" strokeWidth={2} />
       </div>
-      <h3 className="mb-2 text-[17px] font-semibold">{title}</h3>
-      <p className="text-[14.5px] leading-relaxed text-ink-soft">{text}</p>
-    </div>
+      <h3 className="mb-2 text-h3 font-semibold">{title}</h3>
+      <p className="text-sm text-ink-soft">{text}</p>
+    </Reveal>
   );
 }
 
 export default function Features() {
   return (
-    <section id="features" className="pb-24">
-      <h2 className="mb-3 text-center text-[clamp(28px,4.5vw,36px)] font-bold tracking-tight">
-        What Plainword does
-      </h2>
-      <p className="mx-auto mb-14 max-w-[560px] text-center text-[17px] text-pretty text-ink-soft">
-        A spell checker knows the rules of a language. It doesn&rsquo;t know how you write, what the
-        thread above is about, or which model you want to use.
-      </p>
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(250px,1fr))] gap-5">
-        {FEATURES.map((f) => (
-          <FeatureCard key={f.title} {...f} />
+    <Section id="features">
+      <SectionHeading
+        align="center"
+        eyebrow="Features"
+        title="What Plainword does"
+        lead="A spell checker knows the rules of a language. It doesn’t know how you write, what the thread above is about, or which model you want to use."
+      />
+      <div className="mt-14 grid grid-cols-[repeat(auto-fit,minmax(250px,1fr))] gap-5">
+        {FEATURES.map((f, i) => (
+          <FeatureCard key={f.title} {...f} delay={i * 90} />
         ))}
       </div>
-      <div className="mt-10 flex flex-wrap justify-center gap-2.5">
+      <Reveal className="mt-10 flex flex-wrap justify-center gap-2.5">
         {APP_CHIPS.map((chip) => (
           <span
             key={chip}
-            className="rounded-full border border-line bg-white px-4 py-[7px] text-[13.5px] text-ink-soft"
+            className="rounded-full border border-line bg-surface px-4 py-[7px] text-xs text-ink-soft shadow-card transition-colors hover:border-line-strong hover:text-ink"
           >
             {chip}
           </span>
         ))}
-        <span className="rounded-full border border-[#e2defa] bg-brand-muted px-4 py-[7px] text-[13.5px] font-semibold text-brand-strong">
+        <span className="rounded-full border border-brand-soft bg-brand-muted px-4 py-[7px] text-xs font-semibold text-brand-strong">
           in any language
         </span>
-      </div>
-    </section>
+      </Reveal>
+    </Section>
   );
 }

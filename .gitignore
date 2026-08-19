@@ -5,3 +5,4 @@ DerivedData/
 *.xcodeproj/xcuserdata/
 Plainword.xcodeproj/
 .swiftpm/
+build
