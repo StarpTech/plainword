@@ -9,7 +9,6 @@ export default function Footer() {
       </div>
       <div className="flex gap-5 text-[13.5px]">
         <a href={GITHUB_URL} className="text-ink-faint hover:text-brand">GitHub</a>
-        <a href="#privacy" className="text-ink-faint hover:text-brand">Privacy</a>
       </div>
     </footer>
   );
