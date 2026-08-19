@@ -968,9 +968,7 @@ final class CrossAppCorrectionController: ObservableObject {
                 originalText: snapshot.context.text,
                 replacementText: correctionResponse.correctedText,
                 completionIsAllowed: false,
-                classifiedAs: correctionResponse.classification,
-                allowsNewConcreteDetails: true,
-                allowsLanguageChange: true
+                classifiedAs: correctionResponse.classification
             ) else {
                 dismissProposal()
                 activity = .failure("That instruction did not change the selected text.")

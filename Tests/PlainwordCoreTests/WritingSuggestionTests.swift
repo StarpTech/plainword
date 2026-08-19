@@ -49,20 +49,13 @@ final class WritingSuggestionTests: XCTestCase {
         XCTAssertNil(WritingSuggestionPlanner.makeComposition(""))
     }
 
-    func testComposedDraftKeepsDetailAndLanguageAnEditWouldRefuse() throws {
-        // `make` rejects both of these on an edit, where they would mean the model
-        // invented facts or switched language. Writing new text is where they belong.
+    func testComposedDraftCarriesItsOwnDetailAndLanguage() throws {
         let suggestion = try XCTUnwrap(
             WritingSuggestionPlanner.makeComposition("Bin zehn Minuten später da, ab 14:30.")
         )
 
         XCTAssertEqual(suggestion.kind, .composition)
-        XCTAssertNil(
-            WritingSuggestionPlanner.make(
-                originalText: "",
-                replacementText: "Bin zehn Minuten später da, ab 14:30."
-            )
-        )
+        XCTAssertEqual(suggestion.replacementText, "Bin zehn Minuten später da, ab 14:30.")
     }
 
     func testClassifiesShortAppendOnlySuggestionAsCompletion() throws {
@@ -164,25 +157,27 @@ final class WritingSuggestionTests: XCTestCase {
         )
     }
 
-    func testRejectsInventedConcreteDetail() {
-        XCTAssertNil(
+    func testPresentsWhatTheModelWroteRatherThanRejudgingIt() throws {
+        // The model is told not to invent facts and not to switch language, and the
+        // author reads the diff before applying it. The planner does not hold a second
+        // opinion on either question.
+        let dated = try XCTUnwrap(
             WritingSuggestionPlanner.make(
                 originalText: "I will send it soon.",
-                replacementText: "I will send it on Friday."
+                replacementText: "I will send it on Friday.",
+                classifiedAs: .rewrite
             )
         )
-        XCTAssertNil(
+        XCTAssertEqual(dated.replacementText, "I will send it on Friday.")
+
+        let translated = try XCTUnwrap(
             WritingSuggestionPlanner.make(
-                originalText: "The total is ready.",
-                replacementText: "The total is 42."
+                originalText: "Thats funny",
+                replacementText: "Das ist lustig.",
+                classifiedAs: .rewrite
             )
         )
-        XCTAssertNil(
-            WritingSuggestionPlanner.make(
-                originalText: "You can find it online.",
-                replacementText: "You can find it at https://example.com."
-            )
-        )
+        XCTAssertEqual(translated.replacementText, "Das ist lustig.")
     }
 
     func testKeepsCorrectionThatResemblesACalendarWord() throws {
@@ -210,42 +205,6 @@ final class WritingSuggestionTests: XCTestCase {
         )
 
         XCTAssertEqual(suggestion.replacementText, "Let's meet on Tuesday.")
-    }
-
-    func testCustomEditMayApplyExplicitConcreteDetail() throws {
-        let suggestion = try XCTUnwrap(
-            WritingSuggestionPlanner.make(
-                originalText: "I will send it soon.",
-                replacementText: "I will send it on Friday.",
-                classifiedAs: .rewrite,
-                allowsNewConcreteDetails: true
-            )
-        )
-
-        XCTAssertEqual(suggestion.replacementText, "I will send it on Friday.")
-    }
-
-    func testRejectsUnsolicitedLanguageChange() {
-        XCTAssertNil(
-            WritingSuggestionPlanner.make(
-                originalText: "Thats funny",
-                replacementText: "Das ist lustig.",
-                classifiedAs: .rewrite
-            )
-        )
-    }
-
-    func testCustomEditMayExplicitlyChangeLanguage() throws {
-        let suggestion = try XCTUnwrap(
-            WritingSuggestionPlanner.make(
-                originalText: "Thats funny",
-                replacementText: "Das ist lustig.",
-                classifiedAs: .rewrite,
-                allowsLanguageChange: true
-            )
-        )
-
-        XCTAssertEqual(suggestion.replacementText, "Das ist lustig.")
     }
 
     func testReturnsNilForUnchangedText() {

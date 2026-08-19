@@ -54,20 +54,15 @@ public enum WritingSuggestionPlanner {
         originalText: String,
         replacementText: String,
         completionIsAllowed: Bool = true,
-        classifiedAs classification: WritingSuggestionKind? = nil,
-        allowsNewConcreteDetails: Bool = false,
-        allowsLanguageChange: Bool = false
+        classifiedAs classification: WritingSuggestionKind? = nil
     ) -> WritingSuggestion? {
+        // Only the shape of the result is examined here. What the model wrote is the
+        // model's judgement to make: it is told not to invent facts and not to switch
+        // language, and the author reads the diff before applying it. Re-deciding those
+        // questions locally, from a word list and an edit distance, could only discard
+        // sound edits it had no way to understand.
         guard replacementText.contains(where: { !$0.isWhitespace }),
-              originalText != replacementText,
-              allowsNewConcreteDetails || !introducesConcreteDetail(
-                originalText: originalText,
-                replacementText: replacementText
-              ),
-              allowsLanguageChange || !changesDetectedLanguage(
-                originalText: originalText,
-                replacementText: replacementText
-              ) else {
+              originalText != replacementText else {
             return nil
         }
 
@@ -149,9 +144,8 @@ public enum WritingSuggestionPlanner {
 
     /// Returns a draft written for an empty field.
     ///
-    /// None of `make`'s guards apply here: there is no original meaning to preserve, no
-    /// language to keep, and inventing concrete detail is the point rather than a
-    /// failure. All that is left to check is that the model wrote something.
+    /// There is no original to diff against and nothing to preserve, so all that is
+    /// left to check is that the model wrote something.
     public static func makeComposition(_ replacementText: String) -> WritingSuggestion? {
         let draft = replacementText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !draft.isEmpty else { return nil }
@@ -161,21 +155,6 @@ public enum WritingSuggestionPlanner {
             replacementText: draft,
             changes: [.init(original: "", replacement: draft)]
         )
-    }
-
-    private static func changesDetectedLanguage(
-        originalText: String,
-        replacementText: String
-    ) -> Bool {
-        guard let originalLanguage = TextLanguageDetector.dominantLanguageIdentifier(
-            in: originalText
-        ),
-        let replacementLanguage = TextLanguageDetector.dominantLanguageIdentifier(
-            in: replacementText
-        ) else {
-            return false
-        }
-        return originalLanguage != replacementLanguage
     }
 
     private static func difference(
@@ -267,96 +246,5 @@ public enum WritingSuggestionPlanner {
             return .word
         }
         return .punctuation
-    }
-
-    private static func introducesConcreteDetail(
-        originalText: String,
-        replacementText: String
-    ) -> Bool {
-        // The two sides are read differently on purpose. The author's own date may be
-        // misspelled, so the original is matched loosely and "tommorow" still counts as
-        // a date it already holds. A date the model invents is spelled correctly, so the
-        // replacement is matched exactly: matching it loosely too would read an ordinary
-        // corrected word as a date and veto the correction, which is how "just" — two
-        // letters from "july" — used to be discarded.
-        let originalDetails = concreteDetails(
-            in: originalText,
-            matchingCalendarWordsLoosely: true
-        )
-        let replacementDetails = concreteDetails(
-            in: replacementText,
-            matchingCalendarWordsLoosely: false
-        )
-        return !replacementDetails.isSubset(of: originalDetails)
-    }
-
-    private static func concreteDetails(
-        in text: String,
-        matchingCalendarWordsLoosely: Bool
-    ) -> Set<String> {
-        let calendarWords: Set<String> = [
-            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
-            "january", "february", "march", "april", "june", "july", "august",
-            "september", "october", "november", "december", "today", "tomorrow", "tonight"
-        ]
-
-        var details = Set(tokens(in: text).compactMap { token in
-            let normalized = token.text.lowercased()
-            if token.text.contains(where: { $0.isNumber }) {
-                return "number:\(normalized)"
-            }
-            if let calendarWord = calendarWords.first(where: {
-                matchingCalendarWordsLoosely
-                    ? isSameOrLikelyMisspelling(normalized, of: $0)
-                    : normalized == $0
-            }) {
-                return "calendar:\(calendarWord)"
-            }
-            return nil
-        })
-
-        for rawToken in text.split(whereSeparator: { $0.isWhitespace }) {
-            let normalized = rawToken
-                .trimmingCharacters(in: .punctuationCharacters)
-                .lowercased()
-            if normalized.contains("://")
-                || normalized.hasPrefix("www.")
-                || (normalized.contains("@") && normalized.contains(".")) {
-                details.insert("link:\(normalized)")
-            }
-        }
-        return details
-    }
-
-    private static func isSameOrLikelyMisspelling(
-        _ candidate: String,
-        of expected: String
-    ) -> Bool {
-        if candidate == expected { return true }
-        guard candidate.first == expected.first,
-              abs(candidate.count - expected.count) <= 2 else {
-            return false
-        }
-        return editDistance(candidate, expected) <= 2
-    }
-
-    private static func editDistance(_ lhs: String, _ rhs: String) -> Int {
-        let left = Array(lhs)
-        let right = Array(rhs)
-        var previous = Array(0...right.count)
-
-        for (leftIndex, leftCharacter) in left.enumerated() {
-            var current = Array(repeating: 0, count: right.count + 1)
-            current[0] = leftIndex + 1
-            for (rightIndex, rightCharacter) in right.enumerated() {
-                current[rightIndex + 1] = min(
-                    current[rightIndex] + 1,
-                    previous[rightIndex + 1] + 1,
-                    previous[rightIndex] + (leftCharacter == rightCharacter ? 0 : 1)
-                )
-            }
-            previous = current
-        }
-        return previous[right.count]
     }
 }
