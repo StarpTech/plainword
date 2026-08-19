@@ -23,7 +23,7 @@ function ProviderRow({ name, text, icons }) {
 
 export default function Providers() {
   return (
-    <section id="privacy" className="pb-24">
+    <section id="models" className="pb-24">
       <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] items-center gap-[clamp(28px,5vw,56px)] rounded-3xl border border-line bg-white p-[clamp(28px,5vw,56px)]">
         <div>
           <h2 className="mb-4 text-[clamp(26px,4vw,32px)] font-bold tracking-tight text-balance">
@@ -35,8 +35,9 @@ export default function Providers() {
             OpenAI-compatible API key. There is no Plainword subscription on top.
           </p>
           <p className="leading-relaxed text-ink-soft">
-            It runs only when you press the shortcut, shows every change before applying it, and
-            skips password fields. No clipboard, no screen capture, no background typing.
+            Whichever you pick, your writing goes to that provider and nowhere else &mdash; there is
+            no Plainword server in the middle. Every change is shown before it is applied, and
+            nothing is applied until you say so.
           </p>
         </div>
         <div className="flex flex-col gap-3">

@@ -20,6 +20,9 @@ struct PlainwordApp: App {
         _crossAppCorrections = StateObject(wrappedValue: crossAppCorrections)
         _statusBarController = StateObject(wrappedValue: statusBarController)
 
+        appDelegate.shutdownHandler = { [weak settings] in
+            await settings?.shutdown()
+        }
         settings.appearance.apply()
         crossAppCorrections.start()
     }
@@ -43,8 +46,23 @@ struct PlainwordApp: App {
 
 @MainActor
 private final class PlainwordApplicationDelegate: NSObject, NSApplicationDelegate {
+    var shutdownHandler: (() async -> Void)?
+    private var isTerminationPending = false
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let shutdownHandler else { return .terminateNow }
+        guard !isTerminationPending else { return .terminateLater }
+        isTerminationPending = true
+
+        Task {
+            await shutdownHandler()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 }
 

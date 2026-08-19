@@ -297,24 +297,20 @@ final class TextEditContextTests: XCTestCase {
         XCTAssertEqual(context.trailingContext, ". After.")
     }
 
-    func testAddsApplicationContextWithoutChangingEditableRange() {
-        let original = TextEditContext(
+    func testUntypedApplicationContextBecomesARelatedContentFragment() {
+        let context = TextEditContext(
             text: "Draft",
             utf16Location: 4,
             utf16Length: 5,
+            applicationContext: "Earlier conversation",
             leadingContext: "Before",
             trailingContext: "After"
         )
 
-        let enriched = original.withApplicationContext("Earlier conversation")
-
-        XCTAssertEqual(enriched.applicationContext, "Earlier conversation")
-        XCTAssertEqual(enriched.text, original.text)
-        XCTAssertEqual(enriched.range, original.range)
-        XCTAssertEqual(enriched.leadingContext, original.leadingContext)
-        XCTAssertEqual(enriched.trailingContext, original.trailingContext)
+        XCTAssertEqual(context.applicationContext, "Earlier conversation")
+        XCTAssertEqual(context.range, NSRange(location: 4, length: 5))
         XCTAssertEqual(
-            enriched.applicationContextFragments,
+            context.applicationContextFragments,
             [.init(kind: .relatedContent, text: "Earlier conversation")]
         )
     }
@@ -362,37 +358,5 @@ final class TextEditContextTests: XCTestCase {
         XCTAssertEqual(revised.trailingContext, original.trailingContext)
         XCTAssertEqual(revised.targetKind, original.targetKind)
         XCTAssertEqual(revised.completionIsAllowed, original.completionIsAllowed)
-    }
-
-    func testBuildsDeduplicatedBoundedReadOnlyContextFromLatestFragments() {
-        XCTAssertEqual(
-            ReadOnlyContextBuilder.build(
-                from: ["  old   message ", "Draft", "old message", "latest"],
-                excluding: ["Draft"],
-                maximumUTF16Length: 100
-            ),
-            "old message\nlatest"
-        )
-        XCTAssertEqual(
-            ReadOnlyContextBuilder.build(
-                from: ["first message", "second", "third"],
-                maximumUTF16Length: 12
-            ),
-            "second\nthird"
-        )
-        XCTAssertEqual(
-            ReadOnlyContextBuilder.build(
-                from: ["abcdef🙂"],
-                maximumUTF16Length: 3
-            ),
-            "f🙂"
-        )
-        XCTAssertEqual(
-            ReadOnlyContextBuilder.build(
-                from: ["abcdefgh", "latest"],
-                maximumUTF16Length: 10
-            ),
-            "fgh\nlatest"
-        )
     }
 }

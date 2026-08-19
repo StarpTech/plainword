@@ -1,5 +1,12 @@
 import Foundation
 
+/// Identity of a correction request for caching purposes.
+///
+/// The edit target is matched exactly, because the suggestion is spliced back over it.
+/// Everything around the target is matched by digest instead: read-only context is
+/// re-harvested from a live screen on every request and varies in ways that do not change
+/// what the model was asked, so an exact match would discard usable entries constantly.
+/// See `ReadOnlyContextDigest`.
 public struct CorrectionCacheKey: Hashable, Sendable {
     public let endpoint: String
     public let model: String
@@ -10,10 +17,9 @@ public struct CorrectionCacheKey: Hashable, Sendable {
     public let intent: EditIntent
     public let targetKind: TextEditTargetKind
     public let text: String
-    public let applicationContext: String
-    public let applicationContextFragments: [ReadOnlyContextFragment]
-    public let leadingContext: String
-    public let trailingContext: String
+    public let applicationContextDigest: String
+    public let leadingContextDigest: String
+    public let trailingContextDigest: String
 
     public init(
         endpoint: String,
@@ -23,12 +29,7 @@ public struct CorrectionCacheKey: Hashable, Sendable {
         style: String,
         thinkingMode: String,
         intent: EditIntent,
-        targetKind: TextEditTargetKind,
-        text: String,
-        applicationContext: String = "",
-        applicationContextFragments: [ReadOnlyContextFragment] = [],
-        leadingContext: String,
-        trailingContext: String
+        context: TextEditContext
     ) {
         self.endpoint = endpoint
         self.model = model
@@ -37,12 +38,19 @@ public struct CorrectionCacheKey: Hashable, Sendable {
         self.style = style
         self.thinkingMode = thinkingMode
         self.intent = intent
-        self.targetKind = targetKind
-        self.text = text
-        self.applicationContext = applicationContext
-        self.applicationContextFragments = applicationContextFragments
-        self.leadingContext = leadingContext
-        self.trailingContext = trailingContext
+        self.targetKind = context.targetKind
+        self.text = context.text
+        self.applicationContextDigest = ReadOnlyContextDigest.value(
+            for: context.applicationContextFragments
+        )
+        self.leadingContextDigest = ReadOnlyContextDigest.value(
+            for: context.leadingContext,
+            retaining: .end
+        )
+        self.trailingContextDigest = ReadOnlyContextDigest.value(
+            for: context.trailingContext,
+            retaining: .start
+        )
     }
 }
 

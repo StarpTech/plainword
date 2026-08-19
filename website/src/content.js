@@ -34,6 +34,12 @@ export const VOICE_ROWS = [
   { label: 'Instructions', text: '\u201CBritish English, no semicolons, never start with \u2018I hope\u2019.\u201D' },
 ];
 
+export const CONTEXT_NEVER = [
+  'password fields',
+  'other windows or apps',
+  'anything before you press the shortcut',
+];
+
 export const PROVIDERS = [
   {
     name: 'Ollama — fully local',

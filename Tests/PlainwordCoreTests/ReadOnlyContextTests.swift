@@ -186,4 +186,47 @@ final class ReadOnlyContextTests: XCTestCase {
             .init(kind: .fieldLabel, text: "Reply")
         ])
     }
+
+    func testMarksWherePrecedingContentWasRankedOut() {
+        let selected = ReadOnlyContextRanker.select(
+            from: [
+                .init(kind: .relatedPrecedingContent, text: "The oldest message", relevance: 700, readingOrder: 10),
+                .init(kind: .relatedPrecedingContent, text: "A middle message", relevance: 400, readingOrder: 20),
+                .init(kind: .relatedPrecedingContent, text: "The newest message", relevance: 800, readingOrder: 30)
+            ],
+            maximumUTF16Length: 100,
+            maximumFragments: 2
+        )
+
+        XCTAssertEqual(selected.map(\.text), [
+            "The oldest message",
+            "\(ReadOnlyContextRanker.elisionMarker) The newest message"
+        ])
+    }
+
+    func testDoesNotMarkPrecedingContentThatStayedContiguous() {
+        let selected = ReadOnlyContextRanker.select(
+            from: [
+                .init(kind: .relatedPrecedingContent, text: "The older message", relevance: 700, readingOrder: 10),
+                .init(kind: .relatedPrecedingContent, text: "The newer message", relevance: 800, readingOrder: 20)
+            ],
+            maximumUTF16Length: 100
+        )
+
+        XCTAssertEqual(selected.map(\.text), ["The older message", "The newer message"])
+    }
+
+    func testDoesNotMarkGapsBetweenUnrelatedKinds() {
+        let selected = ReadOnlyContextRanker.select(
+            from: [
+                .init(kind: .fieldLabel, text: "Reply", relevance: 1_000, readingOrder: 10),
+                .init(kind: .fieldLabel, text: "Draft label", relevance: 400, readingOrder: 20),
+                .init(kind: .fieldLabel, text: "Recipient", relevance: 900, readingOrder: 30)
+            ],
+            maximumUTF16Length: 100,
+            maximumFragments: 2
+        )
+
+        XCTAssertEqual(selected.map(\.text), ["Reply", "Recipient"])
+    }
 }

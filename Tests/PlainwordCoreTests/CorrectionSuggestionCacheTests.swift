@@ -103,7 +103,6 @@ final class CorrectionSuggestionCacheTests: XCTestCase {
             .unchanged,
             for: key(
                 text: "It works locally.",
-                applicationContext: "Project Atlas",
                 applicationContextFragments: [
                     .init(kind: .documentTitle, text: "Project Atlas")
                 ]
@@ -114,7 +113,6 @@ final class CorrectionSuggestionCacheTests: XCTestCase {
             cache.value(
                 for: key(
                     text: "It works locally.",
-                    applicationContext: "Project Atlas",
                     applicationContextFragments: [
                         .init(kind: .fieldDescription, text: "Project Atlas")
                     ]
@@ -123,10 +121,106 @@ final class CorrectionSuggestionCacheTests: XCTestCase {
         )
     }
 
+    func testRecapturedContextStillHitsDespiteHarvestNoise() {
+        var cache = CorrectionSuggestionCache()
+        cache.insert(
+            .unchanged,
+            for: key(
+                text: "It works locally.",
+                applicationContextFragments: [
+                    .init(kind: .fieldLabel, text: "Reply"),
+                    .init(kind: .relatedPrecedingContent, text: "Atlas shipped yesterday.")
+                ]
+            )
+        )
+
+        // Same screen, captured again: fragments come back in a different order, with
+        // different spacing and capitalisation, and one carries an elision marker.
+        XCTAssertNotNil(
+            cache.value(
+                for: key(
+                    text: "It works locally.",
+                    applicationContextFragments: [
+                        .init(
+                            kind: .relatedPrecedingContent,
+                            text: "\(ReadOnlyContextRanker.elisionMarker) Atlas  shipped yesterday!"
+                        ),
+                        .init(kind: .fieldLabel, text: "reply")
+                    ]
+                )
+            )
+        )
+    }
+
+    func testDifferentConversationsStillMiss() {
+        var cache = CorrectionSuggestionCache()
+        cache.insert(
+            .unchanged,
+            for: key(
+                text: "It works locally.",
+                applicationContextFragments: [
+                    .init(kind: .relatedPrecedingContent, text: "Atlas shipped yesterday.")
+                ]
+            )
+        )
+
+        XCTAssertNil(
+            cache.value(
+                for: key(
+                    text: "It works locally.",
+                    applicationContextFragments: [
+                        .init(kind: .relatedPrecedingContent, text: "Borealis ships on Friday.")
+                    ]
+                )
+            )
+        )
+    }
+
+    func testSurroundingSentencesAreMatchedByDigestNotExactly() {
+        var cache = CorrectionSuggestionCache()
+        cache.insert(
+            .unchanged,
+            for: key(
+                text: "It works locally.",
+                leadingContext: "The introduction is fine.",
+                trailingContext: "The ending is fine."
+            )
+        )
+
+        XCTAssertNotNil(
+            cache.value(
+                for: key(
+                    text: "It works locally.",
+                    leadingContext: "The introduction is fine",
+                    trailingContext: "The  ending is fine!"
+                )
+            )
+        )
+        XCTAssertNil(
+            cache.value(
+                for: key(
+                    text: "It works locally.",
+                    leadingContext: "A different introduction.",
+                    trailingContext: "The ending is fine."
+                )
+            )
+        )
+    }
+
+    func testEditTargetIsStillMatchedExactly() {
+        var cache = CorrectionSuggestionCache()
+        cache.insert(.unchanged, for: key(text: "It works locally."))
+
+        XCTAssertNil(cache.value(for: key(text: "It works locally")))
+        XCTAssertNil(cache.value(for: key(text: "it works locally.")))
+    }
+
     private func key(
         text: String,
         applicationContext: String = "",
-        applicationContextFragments: [ReadOnlyContextFragment] = []
+        applicationContextFragments: [ReadOnlyContextFragment] = [],
+        leadingContext: String = "",
+        trailingContext: String = ""
     ) -> CorrectionCacheKey {
         CorrectionCacheKey(
             endpoint: "https://example.com/v1/chat/completions",
@@ -136,12 +230,16 @@ final class CorrectionSuggestionCacheTests: XCTestCase {
             style: "clear",
             thinkingMode: "low",
             intent: .correct,
-            targetKind: .sentence,
-            text: text,
-            applicationContext: applicationContext,
-            applicationContextFragments: applicationContextFragments,
-            leadingContext: "",
-            trailingContext: ""
+            context: TextEditContext(
+                text: text,
+                utf16Location: 0,
+                utf16Length: (text as NSString).length,
+                applicationContext: applicationContext,
+                applicationContextFragments: applicationContextFragments,
+                leadingContext: leadingContext,
+                trailingContext: trailingContext,
+                targetKind: .sentence
+            )
         )
     }
 }

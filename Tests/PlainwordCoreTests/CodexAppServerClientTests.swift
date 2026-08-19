@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import XCTest
 @testable import PlainwordCore
 
@@ -63,6 +64,63 @@ final class CodexAppServerClientTests: XCTestCase {
             .filter { $0 == "launch" }
         XCTAssertEqual(launches.count, 1)
         XCTAssertTrue(transcript.contains("\"test-mcp\":{\"enabled\":false}"))
+    }
+
+    func testShutdownTerminatesAppServerAndPreventsRestart() async throws {
+        let launchLog = temporaryDirectory.appendingPathComponent("launch.log")
+        let executable = try makeFakeCodex(launchLog: launchLog)
+        let client = CodexAppServerClient(
+            executableURL: executable,
+            requestTimeout: 2
+        )
+
+        _ = try await client.status()
+        await client.shutdown()
+        await client.shutdown()
+
+        let didTerminate = await waitForLogEntry("terminate", in: launchLog)
+        XCTAssertTrue(didTerminate)
+
+        do {
+            _ = try await client.status()
+            XCTFail("A shut-down client must not relaunch Codex")
+        } catch is CancellationError {
+            // Expected.
+        } catch {
+            XCTFail("Expected CancellationError, got \(error)")
+        }
+
+        let transcript = try String(contentsOf: launchLog, encoding: .utf8)
+        let launches = transcript
+            .split(whereSeparator: \.isNewline)
+            .filter { $0 == "launch" }
+        XCTAssertEqual(launches.count, 1)
+    }
+
+    func testRestartsAppServerAfterItWasKilledWhileIdle() async throws {
+        let launchLog = temporaryDirectory.appendingPathComponent("launch.log")
+        let executable = try makeFakeCodex(launchLog: launchLog)
+        let client = CodexAppServerClient(
+            executableURL: executable,
+            requestTimeout: 2
+        )
+
+        _ = try await client.status()
+        let processID = try XCTUnwrap(lastProcessID(in: launchLog))
+        XCTAssertEqual(Darwin.kill(processID, SIGTERM), 0)
+        let didTerminate = await waitForLogEntry("terminate", in: launchLog)
+        XCTAssertTrue(didTerminate)
+
+        let status = try await client.status()
+        XCTAssertEqual(status.email, "writer@example.com")
+
+        let transcript = try String(contentsOf: launchLog, encoding: .utf8)
+        let launches = transcript
+            .split(whereSeparator: \.isNewline)
+            .filter { $0 == "launch" }
+        XCTAssertEqual(launches.count, 2)
+
+        await client.shutdown()
     }
 
     func testCodexSettingsUseAppServerWithoutCredentials() {
@@ -191,7 +249,9 @@ final class CodexAppServerClientTests: XCTestCase {
         let executable = temporaryDirectory.appendingPathComponent("codex")
         let script = """
         #!/bin/sh
+        trap 'echo terminate >> '\''\(launchLog.path)'\''; exit 0' TERM
         echo launch >> '\(launchLog.path)'
+        echo "pid $$" >> '\(launchLog.path)'
         while IFS= read -r line; do
           echo "$line" >> '\(launchLog.path)'
           request_id=$(printf '%s' "$line" | sed -E 's/.*"id":([0-9]+).*/\\1/')
@@ -233,5 +293,32 @@ final class CodexAppServerClientTests: XCTestCase {
             ofItemAtPath: executable.path
         )
         return executable
+    }
+
+    private func lastProcessID(in log: URL) -> pid_t? {
+        guard let contents = try? String(contentsOf: log, encoding: .utf8),
+              let line = contents.split(whereSeparator: \.isNewline).last(where: {
+                  $0.hasPrefix("pid ")
+              }),
+              let processID = Int32(line.dropFirst(4)) else {
+            return nil
+        }
+        return processID
+    }
+
+    private func waitForLogEntry(
+        _ entry: String,
+        in log: URL,
+        timeout: TimeInterval = 2
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let contents = try? String(contentsOf: log, encoding: .utf8),
+               contents.split(whereSeparator: \.isNewline).contains(Substring(entry)) {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return false
     }
 }

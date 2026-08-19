@@ -10,7 +10,7 @@ const FEATURES = [
   {
     icon: MessagesSquare,
     title: 'Uses the text around your cursor',
-    text: 'Plainword sends the selection plus the surrounding paragraph and whatever context the app exposes. A reply in a thread is edited as a reply, not as an isolated sentence.',
+    text: 'A reply in a thread is edited as a reply, not as an isolated sentence. Plainword reads the box you\u2019re writing in, its label and the part of the window just above it \u2014 never the rest of your screen.',
   },
   {
     icon: Cpu,

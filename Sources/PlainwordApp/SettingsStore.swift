@@ -426,6 +426,10 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    func shutdown() async {
+        await codexClient.shutdown()
+    }
+
     func correct(_ text: String) async throws -> CorrectionResponse {
         guard isLLMConfigured else {
             throw DesktopCorrectionError.providerNotConfigured

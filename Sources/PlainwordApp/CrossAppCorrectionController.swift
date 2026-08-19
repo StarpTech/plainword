@@ -350,7 +350,7 @@ final class CrossAppCorrectionController: ObservableObject {
     }
 
     private func requestCorrection(
-        for snapshot: FocusedTextSnapshot,
+        for capturedSnapshot: FocusedTextSnapshot,
         generation: Int,
         compactPresentation: Bool = true
     ) async {
@@ -359,15 +359,19 @@ final class CrossAppCorrectionController: ObservableObject {
             updateIdleActivity()
             return
         }
-        if let identifier = snapshot.applicationIdentifier,
+        if let identifier = capturedSnapshot.applicationIdentifier,
            excludedApplicationIdentifiers.contains(identifier) {
-            activity = .excluded(snapshot.applicationName)
+            activity = .excluded(capturedSnapshot.applicationName)
             return
         }
-        guard snapshot.context.text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 else {
+        guard capturedSnapshot.context.text
+            .trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 else {
             updateIdleActivity()
             return
         }
+
+        let snapshot = await accessibility.enriched(capturedSnapshot)
+        guard isCurrentCorrection(generation) else { return }
 
         let promptLocaleIdentifier = promptLanguageIdentifier(for: snapshot.context)
         let intent = EditIntent.correct
@@ -661,10 +665,12 @@ final class CrossAppCorrectionController: ObservableObject {
     private func requestCustomEdit(
         _ instruction: String,
         for snapshot: FocusedTextSnapshot,
-        editing editContext: TextEditContext,
+        editing capturedEditContext: TextEditContext,
         previousSuggestion: WritingSuggestion?,
         generation: Int
     ) async {
+        let editContext = await accessibility.enriched(capturedEditContext, for: snapshot)
+        guard isCurrentCorrection(generation) else { return }
         let locale = promptLanguageIdentifier(for: editContext)
 
         do {
@@ -756,12 +762,7 @@ final class CrossAppCorrectionController: ObservableObject {
             style: settings.style.rawValue,
             thinkingMode: llmSettings.thinkingMode.rawValue,
             intent: intent,
-            targetKind: context.targetKind,
-            text: context.text,
-            applicationContext: context.applicationContext,
-            applicationContextFragments: context.applicationContextFragments,
-            leadingContext: context.leadingContext,
-            trailingContext: context.trailingContext
+            context: context
         )
     }
 

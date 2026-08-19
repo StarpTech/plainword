@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import OSLog
 import PlainwordCore
 
 struct FocusedTextSnapshot {
@@ -18,7 +19,23 @@ struct FocusedTextSnapshot {
     let anchor: CGRect
 
     var fingerprint: String {
-        "\(processIdentifier):\(capturedTextRange.location):\(documentUTF16Length):\(fullText.hashValue):\(context.applicationContext.hashValue):\(selectedRange.location):\(selectedRange.length)"
+        "\(processIdentifier):\(capturedTextRange.location):\(documentUTF16Length):\(fullText.hashValue):\(selectedRange.location):\(selectedRange.length)"
+    }
+
+    /// Returns the same captured editor state carrying a revised request context.
+    func withContext(_ context: TextEditContext) -> FocusedTextSnapshot {
+        FocusedTextSnapshot(
+            element: element,
+            processIdentifier: processIdentifier,
+            applicationIdentifier: applicationIdentifier,
+            applicationName: applicationName,
+            fullText: fullText,
+            capturedTextRange: capturedTextRange,
+            documentUTF16Length: documentUTF16Length,
+            selectedRange: selectedRange,
+            context: context,
+            anchor: anchor
+        )
     }
 }
 
@@ -59,50 +76,29 @@ final class AccessibilityTextClient {
     private let maximumSelectionLength = 1_600
     private let maximumManualReviewLength = 6_000
     private let maximumSurroundingContextLength = 240
-    private let maximumApplicationContextLength = 2_500
     private let maximumCompleteTextReadLength = 12_000
     private let maximumRangeWindowLength = 2_400
-    private let maximumContextTraversalNodes = 240
-    private let maximumContextTraversalDepth = 12
-    private let maximumContextAncestorDepth = 14
-    private let maximumContextCollectionDuration: CFTimeInterval = 0.12
     private let standardTextRoles: Set<String> = [
         kAXTextFieldRole as String,
         kAXTextAreaRole as String,
         kAXComboBoxRole as String
     ]
-    private let readableContextRoles: Set<String> = [
-        kAXStaticTextRole as String,
-        kAXTextFieldRole as String,
-        kAXTextAreaRole as String,
-        "AXHeading"
-    ]
-    private let contextViewportRoles: Set<String> = [
-        kAXScrollAreaRole as String,
-        "AXWebArea",
-        "AXDocument"
-    ]
-
-    private struct ContextNodeMetadata {
-        let role: String?
-        let frame: CGRect?
-        let isHidden: Bool
-        let isEditable: Bool
-        let isProtected: Bool
-    }
-
-    private struct ContextAncestorLevel {
-        let childOnFocusedPath: AXUIElement
-        let parent: AXUIElement
-        let metadata: ContextNodeMetadata
-        let distance: Int
-    }
 
     private struct CapturedTextState {
         let text: String
         let range: NSRange
         let documentUTF16Length: Int
         let selectedRange: CFRange
+    }
+
+    private let contextHarvester = ReadOnlyContextHarvester()
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.example.Plainword",
+        category: "AccessibilityTextClient"
+    )
+
+    init() {
+        AccessibilityElementReader.applyGlobalMessagingTimeout()
     }
 
     var isTrusted: Bool {
@@ -183,14 +179,11 @@ final class AccessibilityTextClient {
 
         let runningApplication = NSRunningApplication(processIdentifier: processIdentifier)
         let applicationName = runningApplication?.localizedName ?? "Another app"
-        let rankedApplicationContext = readOnlyApplicationContext(
-            around: element,
-            excluding: [fullText, fieldContext.text, applicationName],
-            targetUTF16Length: fieldContext.utf16Length
-        )
+        // Only the source application is attached here. Harvesting the surrounding
+        // interface costs hundreds of Accessibility round trips, so it is deferred to
+        // `enriched(_:)` and runs off this actor while the UI stays responsive.
         let context = fieldContext.withApplicationContext(
             [.init(kind: .sourceApplication, text: applicationName)]
-                + rankedApplicationContext
         )
 
         return FocusedTextSnapshot(
@@ -208,6 +201,62 @@ final class AccessibilityTextClient {
                 textLength: textState.documentUTF16Length,
                 in: element
             )
+        )
+    }
+
+    /// Returns the snapshot with read-only context from the surrounding interface
+    /// attached, harvesting it off this actor.
+    ///
+    /// The harvest observes the interface a moment after the field itself was captured,
+    /// so it can reflect a slightly newer state of the screen. That is acceptable for
+    /// context that is only ever read: the editable target and its offsets come from the
+    /// snapshot, and `snapshotState(_:)` still has to confirm them before anything is
+    /// applied.
+    func enriched(_ snapshot: FocusedTextSnapshot) async -> FocusedTextSnapshot {
+        guard isTrusted else { return snapshot }
+
+        let result = await contextHarvester.fragments(
+            around: AXElementBox(snapshot.element),
+            excluding: [
+                snapshot.fullText,
+                snapshot.context.text,
+                snapshot.applicationName
+            ],
+            targetUTF16Length: snapshot.context.utf16Length,
+            primaryScreenMaxY: primaryScreenMaxY
+        )
+        if result.telemetry.wasTruncated {
+            logger.debug(
+                """
+                Read-only context truncated after \(result.telemetry.nodesExamined, privacy: .public) \
+                nodes in \(Int(result.telemetry.durationSeconds * 1_000), privacy: .public) ms \
+                (node limit: \(result.telemetry.reachedNodeLimit, privacy: .public), \
+                time limit: \(result.telemetry.reachedTimeLimit, privacy: .public))
+                """
+            )
+        }
+        guard !result.fragments.isEmpty else { return snapshot }
+
+        return snapshot.withContext(
+            snapshot.context.withApplicationContext(
+                snapshot.context.applicationContextFragments + result.fragments
+            )
+        )
+    }
+
+    /// Returns a request context — which may target revised text rather than the
+    /// snapshot's own — with the same harvested application context attached.
+    func enriched(
+        _ context: TextEditContext,
+        for snapshot: FocusedTextSnapshot
+    ) async -> TextEditContext {
+        let enrichedSnapshot = await enriched(snapshot)
+        guard enrichedSnapshot.context.applicationContextFragments
+                != context.applicationContextFragments else {
+            return context
+        }
+        return context.withApplicationContext(
+            enrichedSnapshot.context.applicationContextFragments
         )
     }
 
@@ -786,7 +835,7 @@ final class AccessibilityTextClient {
     }
 
     private func isProtected(_ element: AXUIElement) -> Bool {
-        boolAttribute(NSAccessibility.Attribute.containsProtectedContent.rawValue, from: element)
+        AccessibilityElementReader.isProtected(element)
     }
 
     /// Browser address and search controls are exposed as writable text fields inside an
@@ -811,689 +860,73 @@ final class AccessibilityTextClient {
     }
 
     private func isAttributeSettable(_ attribute: String, on element: AXUIElement) -> Bool {
-        var settable = DarwinBoolean(false)
-        return AXUIElementIsAttributeSettable(element, attribute as CFString, &settable) == .success
-            && settable.boolValue
+        AccessibilityElementReader.isAttributeSettable(attribute, on: element)
     }
 
     private func isWritableTextElement(_ element: AXUIElement) -> Bool {
-        if isAttributeSettable(kAXValueAttribute, on: element) {
-            return true
-        }
-
-        // Chromium/WebKit contenteditable roots commonly expose a writable selection
-        // range but make AXSelectedText read-only. They are still safely editable via
-        // the existing range-selection + keyboard-input replacement path. Requiring a
-        // direct AXSelectedText write here prevented capture before that fallback ran.
-        guard boolAttribute(kAXIsEditableAttribute, from: element),
-              isAttributeSettable(kAXSelectedTextRangeAttribute, on: element) else {
-            return false
-        }
-        return hasAttribute(kAXValueAttribute, on: element)
-            || supportsParameterizedAttribute(
-                kAXStringForRangeParameterizedAttribute,
-                on: element
-            )
+        AccessibilityElementReader.isWritableTextElement(element)
     }
 
     private func hasAttribute(_ attribute: String, on element: AXUIElement) -> Bool {
-        var names: CFArray?
-        guard AXUIElementCopyAttributeNames(element, &names) == .success,
-              let names = names as? [String] else {
-            return false
-        }
-        return names.contains(attribute)
+        AccessibilityElementReader.hasAttribute(attribute, on: element)
     }
 
     private func supportsParameterizedAttribute(
         _ attribute: String,
         on element: AXUIElement
     ) -> Bool {
-        var names: CFArray?
-        guard AXUIElementCopyParameterizedAttributeNames(element, &names) == .success,
-              let names = names as? [String] else {
-            return false
-        }
-        return names.contains(attribute)
-    }
-
-    /// Collects typed, read-only context using explicit accessibility relationships
-    /// first and nearby content only as a bounded fallback.
-    private func readOnlyApplicationContext(
-        around focusedElement: AXUIElement,
-        excluding excludedTexts: [String],
-        targetUTF16Length: Int
-    ) -> [ReadOnlyContextFragment] {
-        let collectionDeadline = CFAbsoluteTimeGetCurrent()
-            + maximumContextCollectionDuration
-        let contextBudget = applicationContextBudget(targetUTF16Length: targetUTF16Length)
-        var candidates = directContextCandidates(
-            around: focusedElement,
-            deadline: collectionDeadline
-        )
-        var ancestorLevels: [ContextAncestorLevel] = []
-        var currentElement = focusedElement
-        for distance in 0..<maximumContextAncestorDepth {
-            guard CFAbsoluteTimeGetCurrent() < collectionDeadline else { break }
-            guard let parent = elementAttribute(kAXParentAttribute, from: currentElement) else {
-                break
-            }
-            let metadata = contextNodeMetadata(parent)
-            ancestorLevels.append(
-                ContextAncestorLevel(
-                    childOnFocusedPath: currentElement,
-                    parent: parent,
-                    metadata: metadata,
-                    distance: distance
-                )
-            )
-            if metadata.role == kAXWindowRole as String { break }
-            currentElement = parent
-        }
-
-        for level in ancestorLevels where isDocumentContextRole(level.metadata.role) {
-            guard CFAbsoluteTimeGetCurrent() < collectionDeadline else { break }
-            if let title = stringAttribute(kAXTitleAttribute, from: level.parent) {
-                candidates.append(
-                    .init(
-                        kind: .documentTitle,
-                        text: title,
-                        relevance: 850 - level.distance * 20,
-                        readingOrder: -100 + level.distance
-                    )
-                )
-            }
-        }
-
-        guard let focusedFrame = elementRect(focusedElement), focusedFrame != .zero else {
-            return ReadOnlyContextRanker.select(
-                from: candidates,
-                excluding: excludedTexts,
-                maximumUTF16Length: contextBudget,
-                maximumFragments: 4,
-                minimumRelevance: 300
-            )
-        }
-
-        let windowFrame = ancestorLevels.first {
-            $0.metadata.role == kAXWindowRole as String
-        }?.metadata.frame
-        let viewportFrame = contextViewportFrame(
-            from: ancestorLevels,
-            containing: focusedFrame
-        ) ?? windowFrame
-        let searchBounds = contextSearchBounds(
-            around: focusedFrame,
-            clippedTo: viewportFrame
-        )
-        var remainingNodes = maximumContextTraversalNodes
-        var traversalOrder = 0
-        var visitedElements: [AXUIElement] = [focusedElement]
-        let traversalDeadline = collectionDeadline
-
-        for level in ancestorLevels
-        where remainingNodes > 0 && CFAbsoluteTimeGetCurrent() < traversalDeadline {
-            for sibling in contextChildElements(of: level.parent)
-            where !elementsAreEqual(sibling, level.childOnFocusedPath) {
-                collectContextCandidates(
-                    from: sibling,
-                    focusedFrame: focusedFrame,
-                    searchBounds: searchBounds,
-                    ancestorDistance: level.distance,
-                    depth: 0,
-                    deadline: traversalDeadline,
-                    remainingNodes: &remainingNodes,
-                    traversalOrder: &traversalOrder,
-                    visitedElements: &visitedElements,
-                    candidates: &candidates
-                )
-            }
-        }
-
-        return ReadOnlyContextRanker.select(
-            from: candidates,
-            excluding: excludedTexts,
-            maximumUTF16Length: contextBudget,
-            maximumFragments: 6,
-            minimumRelevance: 300
-        )
-    }
-
-    private func directContextCandidates(
-        around focusedElement: AXUIElement,
-        deadline: CFAbsoluteTime
-    ) -> [ReadOnlyContextCandidate] {
-        let attributes = [
-            kAXTitleAttribute as String,
-            kAXPlaceholderValueAttribute as String,
-            kAXDescriptionAttribute as String,
-            kAXHelpAttribute as String,
-            kAXTitleUIElementAttribute as String,
-            kAXLinkedUIElementsAttribute as String
-        ]
-        let values = multipleAttributeValues(attributes, from: focusedElement)
-        var candidates: [ReadOnlyContextCandidate] = []
-
-        func appendString(_ attribute: String, kind: ReadOnlyContextKind, relevance: Int) {
-            guard let text = stringValue(values[attribute]) else { return }
-            candidates.append(
-                .init(kind: kind, text: text, relevance: relevance, readingOrder: 0)
-            )
-        }
-
-        // AXTitle and AXDescription can both carry the accessible name depending
-        // on the target framework. Keep them as field identity instead of
-        // claiming a label/description distinction that the API cannot guarantee.
-        appendString(kAXTitleAttribute as String, kind: .fieldIdentity, relevance: 970)
-        appendString(
-            kAXPlaceholderValueAttribute as String,
-            kind: .fieldPlaceholder,
-            relevance: 820
-        )
-        appendString(
-            kAXDescriptionAttribute as String,
-            kind: .fieldIdentity,
-            relevance: 950
-        )
-        appendString(
-            kAXHelpAttribute as String,
-            kind: .fieldHelp,
-            relevance: 310
-        )
-
-        if let titleElement = uiElementValue(values[kAXTitleUIElementAttribute as String]),
-           !isProtected(titleElement),
-           let title = readableText(from: titleElement) {
-            candidates.append(
-                .init(kind: .fieldLabel, text: title, relevance: 1_100, readingOrder: 0)
-            )
-        }
-
-        for (index, linkedElement) in uiElementArray(
-            values[kAXLinkedUIElementsAttribute as String]
-        ).prefix(3).enumerated() {
-            guard CFAbsoluteTimeGetCurrent() < deadline else { break }
-            if let candidate = validatedLinkedContextCandidate(
-                from: linkedElement,
-                around: focusedElement,
-                readingOrder: index
-            ) {
-                candidates.append(candidate)
-            }
-        }
-        return candidates
-    }
-
-    private func validatedLinkedContextCandidate(
-        from linkedElement: AXUIElement,
-        around focusedElement: AXUIElement,
-        readingOrder: Int
-    ) -> ReadOnlyContextCandidate? {
-        let metadata = contextNodeMetadata(linkedElement)
-        guard let role = metadata.role,
-              readableContextRoles.contains(role),
-              !metadata.isHidden,
-              !metadata.isProtected,
-              !metadata.isEditable,
-              !readableContextElementIsWritable(role: role, element: linkedElement),
-              linkedElementSharesWindow(linkedElement, with: focusedElement),
-              let focusedFrame = elementRect(focusedElement),
-              let linkedFrame = metadata.frame,
-              isRelevantContextFrame(linkedFrame, to: focusedFrame),
-              let text = readableText(from: linkedElement) else {
-            return nil
-        }
-        return .init(
-            kind: .relatedContent,
-            text: text,
-            relevance: 520 - readingOrder * 10,
-            readingOrder: readingOrder
-        )
-    }
-
-    private func linkedElementSharesWindow(
-        _ linkedElement: AXUIElement,
-        with focusedElement: AXUIElement
-    ) -> Bool {
-        guard let linkedWindow = elementAttribute(kAXWindowAttribute, from: linkedElement),
-              let focusedWindow = elementAttribute(kAXWindowAttribute, from: focusedElement) else {
-            // Some web accessibility nodes omit AXWindow. Geometry validation
-            // still provides a conservative fallback in that case.
-            return true
-        }
-        return elementsAreEqual(linkedWindow, focusedWindow)
-    }
-
-    private func collectContextCandidates(
-        from element: AXUIElement,
-        focusedFrame: CGRect,
-        searchBounds: CGRect,
-        ancestorDistance: Int,
-        depth: Int,
-        deadline: CFAbsoluteTime,
-        remainingNodes: inout Int,
-        traversalOrder: inout Int,
-        visitedElements: inout [AXUIElement],
-        candidates: inout [ReadOnlyContextCandidate]
-    ) {
-        guard remainingNodes > 0,
-              depth <= maximumContextTraversalDepth,
-              CFAbsoluteTimeGetCurrent() < deadline,
-              !visitedElements.contains(where: { elementsAreEqual($0, element) }) else {
-            return
-        }
-        visitedElements.append(element)
-        remainingNodes -= 1
-
-        let metadata = contextNodeMetadata(element)
-        guard !metadata.isHidden, !metadata.isProtected else { return }
-        if let frame = metadata.frame,
-           !frame.intersects(searchBounds),
-           !frame.contains(focusedFrame) {
-            return
-        }
-
-        if let role = metadata.role,
-           readableContextRoles.contains(role),
-           !metadata.isEditable,
-           !readableContextElementIsWritable(role: role, element: element),
-           let text = readableText(from: element),
-           let frame = metadata.frame,
-           let candidate = nearbyContextCandidate(
-                text: text,
-                role: role,
-                frame: frame,
-                focusedFrame: focusedFrame,
-                ancestorDistance: ancestorDistance,
-                readingOrder: traversalOrder
-           ) {
-            candidates.append(candidate)
-            traversalOrder += 1
-            return
-        }
-
-        for child in contextChildElements(of: element) {
-            collectContextCandidates(
-                from: child,
-                focusedFrame: focusedFrame,
-                searchBounds: searchBounds,
-                ancestorDistance: ancestorDistance,
-                depth: depth + 1,
-                deadline: deadline,
-                remainingNodes: &remainingNodes,
-                traversalOrder: &traversalOrder,
-                visitedElements: &visitedElements,
-                candidates: &candidates
-            )
-        }
-    }
-
-    private func readableText(from element: AXUIElement) -> String? {
-        let attributes = [
-            kAXValueAttribute as String,
-            kAXTitleAttribute as String,
-            kAXDescriptionAttribute as String
-        ]
-        let values = multipleAttributeValues(attributes, from: element)
-        for attribute in attributes {
-            if let text = stringValue(values[attribute])?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-               !text.isEmpty {
-                return text
-            }
-        }
-        return nil
-    }
-
-    private func nearbyContextCandidate(
-        text: String,
-        role: String,
-        frame: CGRect,
-        focusedFrame: CGRect,
-        ancestorDistance: Int,
-        readingOrder: Int
-    ) -> ReadOnlyContextCandidate? {
-        guard isRelevantContextFrame(frame, to: focusedFrame) else { return nil }
-
-        let textLength = (text as NSString).length
-        guard textLength >= 3 else { return nil }
-        let horizontalOverlap = max(
-            0,
-            min(frame.maxX, focusedFrame.maxX) - max(frame.minX, focusedFrame.minX)
-        )
-        let overlapRatio = horizontalOverlap / max(1, min(frame.width, focusedFrame.width))
-        let ancestorPenalty = min(160, ancestorDistance * 18)
-
-        let verticallyAligned = frame.maxY > focusedFrame.minY
-            && frame.minY < focusedFrame.maxY
-        if verticallyAligned,
-           frame.maxX <= focusedFrame.minX,
-           focusedFrame.minX - frame.maxX <= 120,
-           textLength <= 120 {
-            return .init(
-                kind: .fieldLabel,
-                text: text,
-                relevance: 820 - ancestorPenalty,
-                readingOrder: readingOrder
-            )
-        }
-
-        if frame.maxY <= focusedFrame.minY {
-            let gap = focusedFrame.minY - frame.maxY
-            guard gap <= 72, textLength <= 320 else { return nil }
-            return .init(
-                kind: .fieldDescription,
-                text: text,
-                relevance: 720 - ancestorPenalty - Int(gap),
-                readingOrder: readingOrder
-            )
-        }
-
-        if frame.minY >= focusedFrame.maxY - 4 {
-            let gap = max(0, frame.minY - focusedFrame.maxY)
-            var relevance = 690 - ancestorPenalty - Int(gap / 3)
-            if overlapRatio >= 0.5 { relevance += 70 }
-            if textLength >= 40 { relevance += 35 }
-            if role == "AXHeading" { relevance += 80 }
-            return .init(
-                kind: role == "AXHeading" ? .documentTitle : .relatedPrecedingContent,
-                text: text,
-                relevance: relevance,
-                readingOrder: readingOrder
-            )
-        }
-
-        guard verticallyAligned, textLength <= 240 else { return nil }
-        return .init(
-            kind: textLength <= 120 ? .fieldDescription : .relatedContent,
-            text: text,
-            relevance: 560 - ancestorPenalty + (overlapRatio >= 0.5 ? 40 : 0),
-            readingOrder: readingOrder
-        )
-    }
-
-    private func readableContextElementIsWritable(
-        role: String,
-        element: AXUIElement
-    ) -> Bool {
-        guard role == kAXTextFieldRole as String
-                || role == kAXTextAreaRole as String
-                || role == kAXComboBoxRole as String else {
-            return false
-        }
-        return isWritableTextElement(element)
-    }
-
-    private func applicationContextBudget(targetUTF16Length: Int) -> Int {
-        let budget: Int
-        switch targetUTF16Length {
-        case ...120:
-            budget = 2_000
-        case ...400:
-            budget = 1_500
-        default:
-            budget = 900
-        }
-        return min(maximumApplicationContextLength, budget)
-    }
-
-    private func contextSearchBounds(
-        around focusedFrame: CGRect,
-        clippedTo windowFrame: CGRect?
-    ) -> CGRect {
-        let horizontalMargin = min(180, max(96, focusedFrame.width * 0.2))
-        var bounds = CGRect(
-            x: focusedFrame.minX - horizontalMargin,
-            y: focusedFrame.minY - 80,
-            width: focusedFrame.width + horizontalMargin * 2,
-            height: focusedFrame.height + 980
-        )
-        if let windowFrame, windowFrame != .zero {
-            bounds = bounds.intersection(windowFrame)
-        }
-        return bounds
-    }
-
-    private func contextViewportFrame(
-        from ancestorLevels: [ContextAncestorLevel],
-        containing focusedFrame: CGRect
-    ) -> CGRect? {
-        ancestorLevels.lazy.compactMap { level -> CGRect? in
-            guard let role = level.metadata.role,
-                  self.contextViewportRoles.contains(role),
-                  let frame = level.metadata.frame,
-                  frame != .zero,
-                  frame.intersects(focusedFrame) || frame.contains(focusedFrame) else {
-                return nil
-            }
-            return frame
-        }.first
-    }
-
-    private func isDocumentContextRole(_ role: String?) -> Bool {
-        guard let role else { return false }
-        return role == kAXWindowRole as String
-            || role == "AXWebArea"
-            || role == "AXDocument"
-    }
-
-    private func contextNodeMetadata(_ element: AXUIElement) -> ContextNodeMetadata {
-        let attributes = [
-            kAXRoleAttribute as String,
-            kAXPositionAttribute as String,
-            kAXSizeAttribute as String,
-            kAXHiddenAttribute as String,
-            kAXIsEditableAttribute as String,
-            NSAccessibility.Attribute.containsProtectedContent.rawValue
-        ]
-        let values = multipleAttributeValues(attributes, from: element)
-        return ContextNodeMetadata(
-            role: stringValue(values[kAXRoleAttribute as String]),
-            frame: contextFrame(from: values),
-            isHidden: boolValue(values[kAXHiddenAttribute as String]),
-            isEditable: boolValue(values[kAXIsEditableAttribute as String]),
-            isProtected: boolValue(
-                values[NSAccessibility.Attribute.containsProtectedContent.rawValue]
-            )
-        )
-    }
-
-    private func contextFrame(from values: [String: Any]) -> CGRect? {
-        guard let positionValue = axValue(values[kAXPositionAttribute as String]),
-              let sizeValue = axValue(values[kAXSizeAttribute as String]) else {
-            return nil
-        }
-        var position = CGPoint.zero
-        var size = CGSize.zero
-        guard AXValueGetValue(positionValue, .cgPoint, &position),
-              AXValueGetValue(sizeValue, .cgSize, &size) else {
-            return nil
-        }
-        return appKitRect(fromAccessibilityRect: CGRect(origin: position, size: size))
-    }
-
-    private func contextChildElements(of element: AXUIElement) -> [AXUIElement] {
-        let navigationOrderAttribute = "AXChildrenInNavigationOrder"
-        let attributes = [
-            kAXContentsAttribute as String,
-            navigationOrderAttribute,
-            kAXVisibleChildrenAttribute as String
-        ]
-        let values = multipleAttributeValues(attributes, from: element)
-        let contentChildren = uiElementArray(values[kAXContentsAttribute as String])
-        let navigationOrder = uiElementArray(values[navigationOrderAttribute])
-        let visibleChildren = uiElementArray(values[kAXVisibleChildrenAttribute as String])
-
-        if !contentChildren.isEmpty {
-            let visibleContent = visibleChildren.isEmpty
-                ? contentChildren
-                : contentChildren.filter { candidate in
-                    visibleChildren.contains(where: { elementsAreEqual($0, candidate) })
-                }
-            let eligibleContent = visibleContent.isEmpty ? contentChildren : visibleContent
-            if !navigationOrder.isEmpty {
-                var orderedContent = navigationOrder.filter { candidate in
-                    eligibleContent.contains(where: { elementsAreEqual($0, candidate) })
-                }
-                for child in eligibleContent
-                where !orderedContent.contains(where: { elementsAreEqual($0, child) }) {
-                    orderedContent.append(child)
-                }
-                if !orderedContent.isEmpty { return orderedContent }
-            }
-            return eligibleContent
-        }
-
-        if !navigationOrder.isEmpty, !visibleChildren.isEmpty {
-            var orderedVisible = navigationOrder.filter { candidate in
-                visibleChildren.contains(where: { elementsAreEqual($0, candidate) })
-            }
-            for child in visibleChildren
-            where !orderedVisible.contains(where: { elementsAreEqual($0, child) }) {
-                orderedVisible.append(child)
-            }
-            if !orderedVisible.isEmpty { return orderedVisible }
-        }
-        if !visibleChildren.isEmpty { return visibleChildren }
-        if !navigationOrder.isEmpty { return navigationOrder }
-        return uiElementArray(attributeValue(kAXChildrenAttribute, from: element))
-    }
-
-    private func isRelevantContextFrame(_ frame: CGRect, to focusedFrame: CGRect) -> Bool {
-        guard frame != .zero,
-              frame.width > 0,
-              frame.height > 0 else {
-            return false
-        }
-
-        let horizontalGap: CGFloat
-        if frame.maxX < focusedFrame.minX {
-            horizontalGap = focusedFrame.minX - frame.maxX
-        } else if frame.minX > focusedFrame.maxX {
-            horizontalGap = frame.minX - focusedFrame.maxX
-        } else {
-            horizontalGap = 0
-        }
-        guard horizontalGap <= min(180, max(96, focusedFrame.width * 0.2)) else {
-            return false
-        }
-
-        if frame.maxY <= focusedFrame.minY {
-            return focusedFrame.minY - frame.maxY <= 72
-        }
-        if frame.minY >= focusedFrame.maxY {
-            return frame.minY - focusedFrame.maxY <= 900
-        }
-        return true
+        AccessibilityElementReader.supportsParameterizedAttribute(attribute, on: element)
     }
 
     private func multipleAttributeValues(
         _ attributes: [String],
         from element: AXUIElement
     ) -> [String: Any] {
-        for attempt in 0..<2 {
-            var rawValues: CFArray?
-            let result = AXUIElementCopyMultipleAttributeValues(
-                element,
-                attributes as CFArray,
-                [],
-                &rawValues
-            )
-            if result == .success, let values = rawValues as? [Any] {
-                var mapped: [String: Any] = [:]
-                for (attribute, value) in zip(attributes, values) {
-                    if !(value is NSNull) {
-                        mapped[attribute] = value
-                    }
-                }
-                return mapped
-            }
-            guard result == .cannotComplete, attempt == 0 else { break }
-        }
-
-        var fallback: [String: Any] = [:]
-        for attribute in attributes {
-            if let value = attributeValue(attribute, from: element) {
-                fallback[attribute] = value
-            }
-        }
-        return fallback
+        AccessibilityElementReader.multipleAttributeValues(attributes, from: element)
     }
 
     private func stringValue(_ value: Any?) -> String? {
-        if let string = value as? String { return string }
-        return (value as? NSAttributedString)?.string
+        AccessibilityElementReader.stringValue(value)
     }
 
     private func boolValue(_ value: Any?) -> Bool {
-        (value as? NSNumber)?.boolValue ?? false
+        AccessibilityElementReader.boolValue(value)
     }
 
     private func axValue(_ value: Any?) -> AXValue? {
-        guard let value else { return nil }
-        let cfValue = value as CFTypeRef
-        guard CFGetTypeID(cfValue) == AXValueGetTypeID() else { return nil }
-        return unsafeDowncast(cfValue, to: AXValue.self)
+        AccessibilityElementReader.axValue(value)
     }
 
     private func uiElementValue(_ value: Any?) -> AXUIElement? {
-        guard let value else { return nil }
-        let cfValue = value as CFTypeRef
-        guard CFGetTypeID(cfValue) == AXUIElementGetTypeID() else { return nil }
-        return unsafeDowncast(cfValue, to: AXUIElement.self)
+        AccessibilityElementReader.uiElementValue(value)
     }
 
     private func uiElementArray(_ value: Any?) -> [AXUIElement] {
-        guard let values = value as? [Any] else { return [] }
-        return values.compactMap(uiElementValue)
+        AccessibilityElementReader.uiElementArray(value)
     }
 
     private func elementsAreEqual(_ lhs: AXUIElement, _ rhs: AXUIElement) -> Bool {
-        CFEqual(lhs, rhs)
+        AccessibilityElementReader.elementsAreEqual(lhs, rhs)
     }
 
     private func stringAttribute(_ attribute: String, from element: AXUIElement) -> String? {
-        guard let value = attributeValue(attribute, from: element) else { return nil }
-        if let string = value as? String {
-            return string
-        }
-        if let attributedString = value as? NSAttributedString {
-            return attributedString.string
-        }
-        return nil
+        AccessibilityElementReader.stringAttribute(attribute, from: element)
     }
 
     private func integerAttribute(_ attribute: String, from element: AXUIElement) -> Int? {
-        (attributeValue(attribute, from: element) as? NSNumber)?.intValue
+        AccessibilityElementReader.integerAttribute(attribute, from: element)
     }
 
     private func boolAttribute(_ attribute: String, from element: AXUIElement) -> Bool {
-        (attributeValue(attribute, from: element) as? NSNumber)?.boolValue ?? false
+        AccessibilityElementReader.boolAttribute(attribute, from: element)
     }
 
     private func rangeAttribute(_ attribute: String, from element: AXUIElement) -> CFRange? {
-        guard let value = attributeValue(attribute, from: element),
-              CFGetTypeID(value) == AXValueGetTypeID() else {
-            return nil
-        }
-        let axValue = unsafeDowncast(value, to: AXValue.self)
-        guard AXValueGetType(axValue) == .cfRange else { return nil }
-        var range = CFRange()
-        return AXValueGetValue(axValue, .cfRange, &range) ? range : nil
+        AccessibilityElementReader.rangeAttribute(attribute, from: element)
     }
 
     private func rangeArrayAttribute(_ attribute: String, from element: AXUIElement) -> [CFRange] {
-        guard let values = attributeValue(attribute, from: element) as? [Any] else {
-            return []
-        }
-        return values.compactMap { value in
-            let cfValue = value as CFTypeRef
-            guard CFGetTypeID(cfValue) == AXValueGetTypeID() else { return nil }
-            let axValue = unsafeDowncast(cfValue, to: AXValue.self)
-            guard AXValueGetType(axValue) == .cfRange else { return nil }
-            var range = CFRange()
-            return AXValueGetValue(axValue, .cfRange, &range) ? range : nil
-        }
+        AccessibilityElementReader.rangeArrayAttribute(attribute, from: element)
     }
 
     private func stringForRange(_ range: NSRange, in element: AXUIElement) -> String? {
@@ -1513,27 +946,11 @@ final class AccessibilityTextClient {
     }
 
     private func elementAttribute(_ attribute: String, from element: AXUIElement) -> AXUIElement? {
-        guard let value = attributeValue(attribute, from: element),
-              CFGetTypeID(value) == AXUIElementGetTypeID() else {
-            return nil
-        }
-        return unsafeDowncast(value, to: AXUIElement.self)
+        AccessibilityElementReader.elementAttribute(attribute, from: element)
     }
 
     private func attributeValue(_ attribute: String, from element: AXUIElement) -> CFTypeRef? {
-        for attempt in 0..<2 {
-            var value: CFTypeRef?
-            let result = AXUIElementCopyAttributeValue(
-                element,
-                attribute as CFString,
-                &value
-            )
-            if result == .success {
-                return value
-            }
-            guard result == .cannotComplete, attempt == 0 else { return nil }
-        }
-        return nil
+        AccessibilityElementReader.attributeValue(attribute, from: element)
     }
 
     private func anchorRect(
@@ -2058,21 +1475,7 @@ final class AccessibilityTextClient {
     }
 
     private func elementRect(_ element: AXUIElement) -> CGRect? {
-        guard let positionValue = attributeValue(kAXPositionAttribute, from: element),
-              CFGetTypeID(positionValue) == AXValueGetTypeID(),
-              let sizeValue = attributeValue(kAXSizeAttribute, from: element),
-              CFGetTypeID(sizeValue) == AXValueGetTypeID() else {
-            return nil
-        }
-        var position = CGPoint.zero
-        var size = CGSize.zero
-        let axPositionValue = unsafeDowncast(positionValue, to: AXValue.self)
-        let axSizeValue = unsafeDowncast(sizeValue, to: AXValue.self)
-        guard AXValueGetValue(axPositionValue, .cgPoint, &position),
-              AXValueGetValue(axSizeValue, .cgSize, &size) else {
-            return nil
-        }
-        return appKitRect(fromAccessibilityRect: CGRect(origin: position, size: size))
+        AccessibilityElementReader.rect(of: element, primaryScreenMaxY: primaryScreenMaxY)
     }
 
     private func caretRect(from bounds: CGRect, range: NSRange, textLength: Int) -> CGRect {
@@ -2087,12 +1490,16 @@ final class AccessibilityTextClient {
     }
 
     private func appKitRect(fromAccessibilityRect rect: CGRect) -> CGRect {
-        guard let primaryScreen = NSScreen.screens.first else { return rect }
-        return CGRect(
-            x: rect.minX,
-            y: primaryScreen.frame.maxY - rect.maxY,
-            width: rect.width,
-            height: rect.height
+        AccessibilityElementReader.appKitRect(
+            fromAccessibilityRect: rect,
+            primaryScreenMaxY: primaryScreenMaxY
         )
+    }
+
+    /// Accessibility reports geometry from the top-left of the primary display while
+    /// AppKit measures from the bottom-left. Reading it here lets the harvester convert
+    /// frames without touching `NSScreen` from another isolation domain.
+    private var primaryScreenMaxY: CGFloat {
+        NSScreen.screens.first?.frame.maxY ?? 0
     }
 }

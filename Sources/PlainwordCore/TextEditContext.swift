@@ -57,19 +57,6 @@ public struct TextEditContext: Equatable, Sendable {
         NSRange(location: utf16Location, length: utf16Length)
     }
 
-    public func withApplicationContext(_ applicationContext: String) -> TextEditContext {
-        TextEditContext(
-            text: text,
-            utf16Location: utf16Location,
-            utf16Length: utf16Length,
-            applicationContext: applicationContext,
-            leadingContext: leadingContext,
-            trailingContext: trailingContext,
-            targetKind: targetKind,
-            completionIsAllowed: completionIsAllowed
-        )
-    }
-
     public func withApplicationContext(
         _ applicationContextFragments: [ReadOnlyContextFragment]
     ) -> TextEditContext {
@@ -118,75 +105,6 @@ public struct TextEditContext: Equatable, Sendable {
             targetKind: targetKind,
             completionIsAllowed: completionIsAllowed
         )
-    }
-}
-
-public enum ReadOnlyContextBuilder {
-    public static func build(
-        from fragments: [String],
-        excluding excludedTexts: [String] = [],
-        maximumUTF16Length: Int
-    ) -> String {
-        guard maximumUTF16Length > 0 else { return "" }
-
-        let excluded = Set(excludedTexts.compactMap(normalized))
-        var seen: Set<String> = []
-        let uniqueFragments = fragments.compactMap { fragment -> String? in
-            guard let text = normalized(fragment),
-                  !excluded.contains(text),
-                  seen.insert(text).inserted else {
-                return nil
-            }
-            return text
-        }
-        guard !uniqueFragments.isEmpty else { return "" }
-
-        var kept: [String] = []
-        var keptLength = 0
-        for fragment in uniqueFragments.reversed() {
-            let separatorLength = kept.isEmpty ? 0 : 1
-            let fragmentLength = (fragment as NSString).length
-            if fragmentLength + separatorLength + keptLength <= maximumUTF16Length {
-                kept.append(fragment)
-                keptLength += fragmentLength + separatorLength
-                continue
-            }
-
-            let remainingLength = maximumUTF16Length - keptLength - separatorLength
-            if remainingLength > 0 {
-                let partialFragment = suffix(
-                    of: fragment,
-                    maximumUTF16Length: remainingLength
-                )
-                if !partialFragment.isEmpty {
-                    kept.append(partialFragment)
-                }
-            }
-            break
-        }
-
-        return kept.reversed().joined(separator: "\n")
-    }
-
-    private static func normalized(_ text: String) -> String? {
-        let normalized = text
-            .replacingOccurrences(of: "\u{00a0}", with: " ")
-            .split(whereSeparator: \.isWhitespace)
-            .joined(separator: " ")
-        return normalized.isEmpty ? nil : normalized
-    }
-
-    private static func suffix(of text: String, maximumUTF16Length: Int) -> String {
-        guard (text as NSString).length > maximumUTF16Length else { return text }
-        var reversedCharacters: [Character] = []
-        var length = 0
-        for character in text.reversed() {
-            let characterLength = String(character).utf16.count
-            guard length + characterLength <= maximumUTF16Length else { break }
-            reversedCharacters.append(character)
-            length += characterLength
-        }
-        return String(reversedCharacters.reversed())
     }
 }
 

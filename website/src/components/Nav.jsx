@@ -9,6 +9,7 @@ export default function Nav() {
       </a>
       <div className="flex flex-wrap items-center gap-3 sm:gap-6">
         <a href="#features" className="hidden text-sm text-ink-soft hover:text-brand sm:block">Features</a>
+        <a href="#privacy" className="hidden text-sm text-ink-soft hover:text-brand sm:block">Privacy</a>
         <a
           href={DOWNLOAD_URL}
           className="rounded-[10px] bg-brand px-4 py-2 text-sm font-semibold whitespace-nowrap text-white hover:bg-brand-strong"

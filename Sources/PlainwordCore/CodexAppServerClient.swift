@@ -266,6 +266,7 @@ public actor CodexAppServerClient {
     private var executableURL: URL?
     private var runningProcess: RunningCodexProcess?
     private var isInitialized = false
+    private var isShutDown = false
     private var startupTask: Task<Void, Error>?
     private var standardOutputBuffer = Data()
     private var standardErrorBuffer = Data()
@@ -285,6 +286,14 @@ public actor CodexAppServerClient {
         self.requestTimeout = requestTimeout
         self.turnTimeout = turnTimeout
         self.debugHandler = debugHandler
+    }
+
+    public func shutdown() {
+        guard !isShutDown else { return }
+        isShutDown = true
+        startupTask?.cancel()
+        failAll(with: CancellationError())
+        stopProcess()
     }
 
     public func status() async throws -> CodexProviderStatus {
@@ -670,6 +679,7 @@ public actor CodexAppServerClient {
     }
 
     private func ensureStarted() async throws {
+        guard !isShutDown else { throw CancellationError() }
         if let startupTask {
             return try await startupTask.value
         }
@@ -791,6 +801,7 @@ public actor CodexAppServerClient {
         params: CodexJSONValue
     ) async throws -> CodexJSONValue {
         try Task.checkCancellation()
+        guard !isShutDown else { throw CancellationError() }
         guard runningProcess?.process.isRunning == true else {
             throw CodexAppServerClientError.processExited(
                 status: runningProcess?.process.terminationStatus ?? -1,
@@ -842,6 +853,7 @@ public actor CodexAppServerClient {
     }
 
     private func sendNotification(method: String, params: CodexJSONValue) throws {
+        guard !isShutDown else { throw CancellationError() }
         guard let runningProcess, runningProcess.process.isRunning else {
             throw CodexAppServerClientError.processExited(
                 status: runningProcess?.process.terminationStatus ?? -1,

@@ -3,6 +3,7 @@ import Nav from './components/Nav.jsx';
 import Hero from './components/Hero.jsx';
 import Features from './components/Features.jsx';
 import VoiceSection from './components/VoiceSection.jsx';
+import ContextSection from './components/ContextSection.jsx';
 import Providers from './components/Providers.jsx';
 import DownloadCta from './components/DownloadCta.jsx';
 import Footer from './components/Footer.jsx';
@@ -16,6 +17,7 @@ export default function App() {
         <Hero />
         <Features />
         <VoiceSection />
+        <ContextSection />
         <Providers />
         <DownloadCta />
         <Footer />

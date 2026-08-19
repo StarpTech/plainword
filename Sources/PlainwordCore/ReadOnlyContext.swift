@@ -1,6 +1,6 @@
 import Foundation
 
-public enum ReadOnlyContextKind: String, Equatable, Hashable, Sendable {
+public enum ReadOnlyContextKind: String, CaseIterable, Equatable, Hashable, Sendable {
     case sourceApplication
     case fieldLabel
     case fieldIdentity
@@ -9,7 +9,6 @@ public enum ReadOnlyContextKind: String, Equatable, Hashable, Sendable {
     case fieldHelp
     case documentTitle
     case relatedPrecedingContent
-    case relatedFollowingContent
     case relatedContent
 
     public var promptTag: String {
@@ -30,8 +29,6 @@ public enum ReadOnlyContextKind: String, Equatable, Hashable, Sendable {
             "document_title"
         case .relatedPrecedingContent:
             "related_preceding_content"
-        case .relatedFollowingContent:
-            "related_following_content"
         case .relatedContent:
             "related_application_content"
         }
@@ -47,12 +44,18 @@ public enum ReadOnlyContextKind: String, Equatable, Hashable, Sendable {
         case .fieldHelp: 5
         case .documentTitle: 6
         case .relatedPrecedingContent: 7
-        case .relatedFollowingContent: 8
-        case .relatedContent: 9
+        case .relatedContent: 8
         }
     }
 
-    fileprivate var keepsNearestSuffixWhenTruncated: Bool {
+    var keepsNearestSuffixWhenTruncated: Bool {
+        self == .relatedPrecedingContent
+    }
+
+    /// Whether a run of fragments of this kind reads as one continuous passage. When it
+    /// does, dropping a fragment from the middle silently joins two pieces of text that
+    /// were never adjacent, so the omission has to be marked.
+    fileprivate var contiguityMatters: Bool {
         self == .relatedPrecedingContent
     }
 
@@ -64,8 +67,6 @@ public enum ReadOnlyContextKind: String, Equatable, Hashable, Sendable {
             320
         case .documentTitle:
             240
-        case .relatedFollowingContent:
-            480
         case .relatedPrecedingContent, .relatedContent:
             900
         }
@@ -164,7 +165,7 @@ public enum ReadOnlyContextRanker {
             remainingLength -= (text as NSString).length + separatorLength
         }
 
-        return selected.sorted { lhs, rhs in
+        let presented = selected.sorted { lhs, rhs in
             let lhsKind = lhs.candidate.kind.presentationOrder
             let rhsKind = rhs.candidate.kind.presentationOrder
             if lhsKind != rhsKind { return lhsKind < rhsKind }
@@ -172,8 +173,46 @@ public enum ReadOnlyContextRanker {
                 return lhs.candidate.readingOrder < rhs.candidate.readingOrder
             }
             return lhs.insertionOrder < rhs.insertionOrder
-        }.map {
-            ReadOnlyContextFragment(kind: $0.candidate.kind, text: $0.text)
+        }
+        return markingOmissions(in: presented, drawnFrom: ranked)
+    }
+
+    /// Marker for a passage that was ranked out from between two selected fragments.
+    /// Without it the two read as consecutive, which invents an adjacency that the
+    /// source never had.
+    public static let elisionMarker = "[…]"
+
+    /// Prefixes the marker to any fragment that a person would read as continuing the
+    /// previous one when something was dropped in between.
+    ///
+    /// Markers are added after the length budget has been spent, so a selection can
+    /// exceed `maximumUTF16Length` by at most `maximumFragments` markers.
+    private static func markingOmissions(
+        in presented: [RankedCandidate],
+        drawnFrom ranked: [RankedCandidate]
+    ) -> [ReadOnlyContextFragment] {
+        let selectedOrders = Set(presented.map(\.insertionOrder))
+        return presented.enumerated().map { index, item in
+            guard index > 0 else {
+                return ReadOnlyContextFragment(kind: item.candidate.kind, text: item.text)
+            }
+            let previous = presented[index - 1]
+            let kind = item.candidate.kind
+            guard kind.contiguityMatters, previous.candidate.kind == kind else {
+                return ReadOnlyContextFragment(kind: kind, text: item.text)
+            }
+            let lowerBound = min(previous.candidate.readingOrder, item.candidate.readingOrder)
+            let upperBound = max(previous.candidate.readingOrder, item.candidate.readingOrder)
+            let omittedContentExists = ranked.contains { other in
+                other.candidate.kind == kind
+                    && !selectedOrders.contains(other.insertionOrder)
+                    && other.candidate.readingOrder > lowerBound
+                    && other.candidate.readingOrder < upperBound
+            }
+            return ReadOnlyContextFragment(
+                kind: kind,
+                text: omittedContentExists ? "\(elisionMarker) \(item.text)" : item.text
+            )
         }
     }
 
