@@ -45,6 +45,16 @@ enum AccessibilitySnapshotState: Equatable {
     case unavailable
 }
 
+/// Where the source application's keyboard focus sits relative to a captured snapshot.
+enum AccessibilityFocusState: Equatable {
+    /// Focus is still in the field the snapshot was captured from.
+    case matchesSnapshot
+    /// Focus moved to a different place the user can write in.
+    case otherEditableElement
+    /// Focus is somewhere that is not a writing site, or cannot be read at all.
+    case unavailable
+}
+
 enum AccessibilityTextError: LocalizedError {
     case permissionRequired
     case fieldChanged
@@ -451,6 +461,53 @@ final class AccessibilityTextClient {
             return .unavailable
         }
         return currentText == snapshot.fullText ? .unchanged : .changed
+    }
+
+    /// Reports whether the source application still has the reviewed field focused.
+    ///
+    /// A caret moving inside that field leaves a proposal applicable, so this is
+    /// deliberately narrower than the selection and value checks: only focus landing on
+    /// a different writable element retires the proposal.
+    func focusState(for snapshot: FocusedTextSnapshot) -> AccessibilityFocusState {
+        guard isTrusted else { return .unavailable }
+
+        let applicationElement = AXUIElementCreateApplication(snapshot.processIdentifier)
+        guard var element = elementAttribute(
+            kAXFocusedUIElementAttribute,
+            from: applicationElement
+        ) else {
+            return .unavailable
+        }
+
+        if !isSupportedTextElement(element),
+           let editableAncestor = elementAttribute(kAXEditableAncestorAttribute, from: element) {
+            element = editableAncestor
+        }
+        if elementsAreEqual(element, snapshot.element) {
+            return .matchesSnapshot
+        }
+
+        // Menus, buttons, and the placeholder focus some applications report while a
+        // panel is key are not a new writing site. Treating them as unavailable leaves
+        // the decision to revalidation instead of retiring a usable proposal.
+        guard isSupportedTextElement(element), !isProtected(element) else {
+            return .unavailable
+        }
+        return .otherEditableElement
+    }
+
+    /// The screen frame of the window holding a snapshot's text, in AppKit coordinates.
+    ///
+    /// A proposal is anchored to text rather than to the screen, so this is what a
+    /// pinned anchor is measured against while the user drags or resizes the window.
+    func sourceWindowFrame(for snapshot: FocusedTextSnapshot) -> CGRect? {
+        guard let window = elementAttribute(kAXWindowAttribute, from: snapshot.element) else {
+            return nil
+        }
+        guard let frame = elementRect(window), frame.width > 0, frame.height > 0 else {
+            return nil
+        }
+        return frame
     }
 
     func isUnchanged(_ snapshot: FocusedTextSnapshot) -> Bool {

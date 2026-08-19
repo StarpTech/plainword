@@ -99,17 +99,35 @@ final class CrossAppCorrectionController: ObservableObject {
     private var shortcutActivity: NSObjectProtocol?
     private var correctionTask: Task<Void, Never>?
     private var sourceOverlayTrackingTask: Task<Void, Never>?
+    private var sourceWindowTrackingTask: Task<Void, Never>?
     private var proposalRevalidationTask: Task<Void, Never>?
     private var correctionGeneration = 0
     private var applicationTask: Task<Void, Never>?
     private var started = false
     private var isApplyingProposal = false
-    private var isProposalVisible = false
+    private var isProposalVisible = false {
+        didSet {
+            guard isProposalVisible != oldValue else { return }
+            if isProposalVisible {
+                startSourceWindowTracking()
+            } else {
+                stopSourceWindowTracking()
+            }
+        }
+    }
     private var isProposalSuspended = false
     private var isCustomPromptVisible = false
     private var isReviewTriggerVisible = false
     private var isSuggestionPromptTriggerVisible = false
-    private var pendingSnapshot: FocusedTextSnapshot?
+    private var pendingSnapshot: FocusedTextSnapshot? {
+        didSet {
+            // The panel is anchored to text inside this window. Recording the frame the
+            // anchor was measured against is what later movement is measured from.
+            sourceWindowFrame = pendingSnapshot.flatMap {
+                accessibility.sourceWindowFrame(for: $0)
+            }
+        }
+    }
     private var pendingCorrectionText: String?
     private var pendingSuggestion: WritingSuggestion?
     private var suggestionHistory: [WritingSuggestion] = []
@@ -117,6 +135,8 @@ final class CrossAppCorrectionController: ObservableObject {
     private var preparedManualSnapshotDate: Date?
     private var pendingPanelAnchor: CGRect?
     private var isPanelAnchorPinned = false
+    /// The source window frame the current panel anchor was last reconciled against.
+    private var sourceWindowFrame: CGRect?
     private var suggestionCache = CorrectionSuggestionCache()
     private var reviewShortcutGate = ShortcutInvocationGate(minimumInterval: 0.35)
     private var transformShortcutGate = ShortcutInvocationGate(minimumInterval: 0.35)
@@ -1292,6 +1312,85 @@ final class CrossAppCorrectionController: ObservableObject {
         sourceOverlay.dismiss()
     }
 
+    /// Polls the source window while a proposal is on screen.
+    ///
+    /// Window notifications are the fast path, but applications are not required to post
+    /// them and some only report a drag once it ends. This keeps the panel attached in
+    /// those applications too, and costs nothing while the proposal is suspended.
+    private func startSourceWindowTracking() {
+        sourceWindowTrackingTask?.cancel()
+        sourceWindowTrackingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled, let self else { return }
+                self.followSourceWindowMovement()
+            }
+        }
+    }
+
+    private func stopSourceWindowTracking() {
+        sourceWindowTrackingTask?.cancel()
+        sourceWindowTrackingTask = nil
+    }
+
+    /// Moves the panel with the window that draws the text it points at.
+    ///
+    /// Dragging or resizing a window moves the reviewed text without changing it. A
+    /// proposal that stayed where it was would underline the wrong words, which is worse
+    /// than not being there at all.
+    private func followSourceWindowMovement() {
+        guard isProposalVisible,
+              !isProposalSuspended,
+              let snapshot = pendingSnapshot,
+              activeApplicationProcessIdentifier == snapshot.processIdentifier,
+              let delta = consumeSourceWindowTranslation(for: snapshot) else {
+            return
+        }
+
+        if let anchor = pendingPanelAnchor {
+            pendingPanelAnchor = anchor.offsetBy(dx: delta.width, dy: delta.height)
+        }
+        proposalPanel.translate(by: delta)
+        refreshSourceOverlayGeometry()
+    }
+
+    /// Returns how far the source window moved since the panel anchor was last
+    /// reconciled with it, and records the new frame as the reference for the next call.
+    ///
+    /// Movement is measured from the top-left corner because text lays out from the top:
+    /// a window resized by its bottom edge does not move the text above it.
+    private func consumeSourceWindowTranslation(
+        for snapshot: FocusedTextSnapshot
+    ) -> CGSize? {
+        guard let currentFrame = accessibility.sourceWindowFrame(for: snapshot) else {
+            return nil
+        }
+        defer { sourceWindowFrame = currentFrame }
+        guard let previousFrame = sourceWindowFrame else { return nil }
+
+        let delta = CGSize(
+            width: currentFrame.minX - previousFrame.minX,
+            height: currentFrame.maxY - previousFrame.maxY
+        )
+        guard abs(delta.width) >= 1 || abs(delta.height) >= 1 else { return nil }
+        return delta
+    }
+
+    /// Redraws the source marks immediately after the window moved, so an underline
+    /// cannot sit on the old glyphs until the next geometry poll.
+    private func refreshSourceOverlayGeometry() {
+        guard sourceOverlayTrackingTask != nil,
+              let snapshot = pendingSnapshot,
+              let suggestion = pendingSuggestion,
+              let geometry = accessibility.sourceSuggestionGeometry(
+                for: snapshot,
+                suggestion: suggestion
+              ) else {
+            return
+        }
+        sourceOverlay.show(geometry, below: proposalPanel.windowNumber)
+    }
+
     private func scheduleProposalRevalidation(initialDelayMilliseconds: Int = 0) {
         proposalRevalidationTask?.cancel()
         guard isProposalVisible,
@@ -1369,7 +1468,14 @@ final class CrossAppCorrectionController: ObservableObject {
             : .sourceOverlay
         let panelAnchor: CGRect
         if isPanelAnchorPinned, let pinnedAnchor = pendingPanelAnchor {
-            panelAnchor = pinnedAnchor
+            // The window can move while the user is away in another application, and no
+            // notification arrives for a proposal that is not on screen.
+            if let delta = consumeSourceWindowTranslation(for: snapshot) {
+                panelAnchor = pinnedAnchor.offsetBy(dx: delta.width, dy: delta.height)
+            } else {
+                panelAnchor = pinnedAnchor
+            }
+            pendingPanelAnchor = panelAnchor
         } else {
             panelAnchor = geometry?.anchor ?? snapshot.anchor
             pendingPanelAnchor = panelAnchor
@@ -1407,6 +1513,7 @@ final class CrossAppCorrectionController: ObservableObject {
         isSuggestionPromptTriggerVisible = false
         pendingPanelAnchor = nil
         isPanelAnchorPinned = false
+        sourceWindowFrame = nil
         stopSourceOverlay()
         proposalPanel.dismiss()
     }
@@ -1746,7 +1853,10 @@ final class CrossAppCorrectionController: ObservableObject {
         case .valueChanged:
             handleObservedValueChange()
         case .focusedElementChanged:
-            guard !isProposalVisible else { return }
+            guard !isProposalVisible else {
+                handleObservedFocusChange()
+                return
+            }
             cancelPendingCorrection(dismissProposal: true)
             updateIdleActivity()
         case .elementDestroyed:
@@ -1763,6 +1873,34 @@ final class CrossAppCorrectionController: ObservableObject {
             updateIdleActivity()
         case .selectionChanged:
             handleObservedSelectionChange()
+        case .windowGeometryChanged:
+            followSourceWindowMovement()
+        }
+    }
+
+    /// A proposal belongs to the field it was captured from.
+    ///
+    /// Moving the caret inside that field keeps it, because the suggestion still applies
+    /// there. Focus landing on another place the user can write in retires it: that is a
+    /// click outside in the only sense that matters to an anchored proposal.
+    private func handleObservedFocusChange() {
+        guard let pendingSnapshot else { return }
+        // The prompt takes key focus, and some applications report their own focus
+        // moving in response. Nothing about the reviewed field changed.
+        guard !isCustomPromptVisible else { return }
+        guard activeApplicationProcessIdentifier == pendingSnapshot.processIdentifier else {
+            return
+        }
+
+        switch accessibility.focusState(for: pendingSnapshot) {
+        case .matchesSnapshot:
+            return
+        case .unavailable:
+            // The element may have been recreated with the same content. Revalidation
+            // restores the proposal when it can and retires it when it cannot.
+            scheduleProposalRevalidation()
+        case .otherEditableElement:
+            dismissProposal()
         }
     }
 

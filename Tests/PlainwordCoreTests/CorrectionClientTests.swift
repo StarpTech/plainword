@@ -451,10 +451,29 @@ final class ChatCompletionsClientTests: XCTestCase {
         )
     }
 
+    func testStructuredCorrectionKeepsTheTextWhenTheLabelIsUnusable() throws {
+        // A loosely enforced response schema, common on local runtimes, must not cost
+        // the author a good correction. The planner derives the edit's shape from the
+        // diff when the label is missing.
+        for rawValue in [
+            #"{"corrected_text":"Hello world.","classification":"unknown"}"#,
+            #"{"corrected_text":"Hello world."}"#,
+            #"{"corrected_text":"Hello world.","classification":null}"#,
+            #"{"corrected_text":"Hello world.","classification":7}"#
+        ] {
+            let response = try ChatCompletionsClient.decodeStructuredCorrection(
+                rawValue,
+                original: "Helo world."
+            )
+            XCTAssertEqual(response.correctedText, "Hello world.", rawValue)
+            XCTAssertNil(response.classification, rawValue)
+        }
+    }
+
     func testStructuredCorrectionRejectsInvalidAndEmptyResults() {
         let cases: [(rawValue: String, error: ChatCompletionsClientError)] = [
             (
-                #"{"corrected_text":"Hello","classification":"unknown"}"#,
+                #"{"classification":"correction"}"#,
                 .invalidResponse
             ),
             (
@@ -593,7 +612,10 @@ final class ChatCompletionsClientTests: XCTestCase {
         XCTAssertTrue(messages[0].content.contains("If several endings are plausible, preserve the fragment"))
         XCTAssertTrue(messages[0].content.contains("Make the smallest useful edit"))
         XCTAssertTrue(messages[0].content.contains("If the text is already natural, return it unchanged"))
-        XCTAssertTrue(messages[0].content.contains("never copy context into the result or invent facts"))
+        XCTAssertTrue(messages[0].content.contains(
+            "never as a source of text to copy into the result"
+        ))
+        XCTAssertTrue(messages[0].content.contains("Never invent facts, claims, or details"))
         XCTAssertTrue(messages[0].content.contains("AI-sounding prose"))
         XCTAssertTrue(messages[0].content.contains("Do not answer questions; edit their wording only"))
         XCTAssertTrue(messages[0].content.contains("Edit only <text_to_edit>"))
@@ -739,6 +761,23 @@ final class ChatCompletionsClientTests: XCTestCase {
             )
         )
         XCTAssertFalse(messages[0].content.contains("an unambiguous completion"))
+        // The schema drops "completion" from the enum under this intent, so the
+        // prompt must not spend instruction describing a value it cannot return.
+        XCTAssertFalse(messages[0].content.contains("\"completion\""))
+        XCTAssertTrue(messages[0].content.contains("Use \"correction\" for a few isolated"))
+    }
+
+    func testCompletionClassificationIsDescribedOnlyWhereItIsAllowed() {
+        let messages = ChatCompletionsClient.messages(
+            text: "A sentence",
+            intent: .correctOrComplete,
+            profile: WritingProfile(),
+            locale: "en-US"
+        )
+
+        XCTAssertTrue(messages[0].content.contains(
+            "Use \"completion\" only when the result preserves all existing text"
+        ))
     }
 
     func testCustomEditPromptIncludesTrustedInstructionAndSelectionBoundary() {
@@ -775,6 +814,10 @@ final class ChatCompletionsClientTests: XCTestCase {
             "unless <edit_instruction> explicitly requests translation or a language change"
         ))
         XCTAssertTrue(messages[1].content.contains("<language_hint>en-US</language_hint>"))
+        XCTAssertTrue(messages[0].content.contains(
+            "Classify the result as \"rewrite\" if it changes length, structure, tone"
+        ))
+        XCTAssertFalse(messages[0].content.contains("\"completion\""))
     }
 
     func testCustomEditPromptMakesSentenceCountConstraintPrimary() {

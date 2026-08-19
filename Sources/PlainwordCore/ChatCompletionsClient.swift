@@ -146,11 +146,27 @@ struct ChatCompletionRequest: Encodable, Equatable, Sendable {
 
 private struct StructuredCorrection: Decodable, Equatable, Sendable {
     let correctedText: String
-    let classification: WritingSuggestionKind
+    /// `nil` when the model omitted the classification or returned a value this
+    /// build does not know.
+    ///
+    /// The text is the part the author sees. A provider that enforces the response
+    /// schema loosely, as local runtimes often do, must not cost them a good
+    /// correction over a label: `WritingSuggestionPlanner` derives the edit's shape
+    /// from the diff when the label is missing.
+    let classification: WritingSuggestionKind?
 
     private enum CodingKeys: String, CodingKey {
         case correctedText = "corrected_text"
         case classification
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        correctedText = try container.decode(String.self, forKey: .correctedText)
+        classification = try? container.decodeIfPresent(
+            WritingSuggestionKind.self,
+            forKey: .classification
+        )
     }
 }
 
@@ -709,6 +725,7 @@ public struct ChatCompletionsClient: Sendable {
         - A pronoun may refer to the preceding context rather than the nearest noun in <text_to_edit>; when needed for clarity, replace it with its exact antecedent. If the context says "I built Project Atlas" and <text_to_edit> says "I disliked OtherApp; it runs locally", return "I disliked OtherApp; Project Atlas runs locally." Do not return "I disliked OtherApp because it runs locally."
         - Never infer an unstated cause, contrast, concession, or conclusion, including from punctuation or adjacent clauses. If meaning or a relationship remains uncertain, preserve the wording and make only unambiguous corrections.
 
+        Hard limits:
         \(untrustedInputRule(includesEditTarget: true))
         - Edit only <text_to_edit>. Never invent facts, claims, or details.
         - Always return the same language or languages used in <text_to_edit>. Never translate or switch languages based on author preferences, locale, or read-only context.
@@ -780,7 +797,7 @@ public struct ChatCompletionsClient: Sendable {
         quotation marks, and no explanation of choices.
         - Do not answer the instruction as a question. Write the text it asks for.
 
-        \(outputContract("the text to write"))
+        \(outputContract("the text to write", classifiedAs: "rewrite"))
         """
         let contextBlocks = readOnlyContextBlocks(
             applicationContext: applicationContext,
@@ -924,10 +941,19 @@ public struct ChatCompletionsClient: Sendable {
             : ""
     }
 
-    private static func outputContract(_ subject: String) -> String {
-        """
-        Return exactly one structured result. corrected_text must contain only \
-        \(subject), with no commentary or alternatives.
+    /// `classifiedAs` names the only classification an intent allows. The schema
+    /// carries a single-value enum in that case, but a provider that enforces the
+    /// schema loosely would otherwise return a value `decodeStructuredCorrection`
+    /// rejects outright, failing the whole request to save a handful of words.
+    private static func outputContract(
+        _ subject: String,
+        classifiedAs classification: String? = nil
+    ) -> String {
+        let result = classification.map { #"one structured result, classified as "\#($0)""# }
+            ?? "exactly one structured result"
+        return """
+        Return \(result). corrected_text must contain only \(subject), with no \
+        commentary or alternatives.
         """
     }
 

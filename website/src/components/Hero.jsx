@@ -12,13 +12,13 @@ export default function Hero() {
     <header className="relative pt-14 pb-[clamp(56px,7vw,88px)] md:pt-24">
       <div className={`${CONTAINER} relative text-center`}>
         {/* Floating popovers — wide screens only */}
-        <div className="absolute top-[170px] left-[max(calc(50%-600px),-120px)] z-0 hidden w-[300px] -rotate-4 flex-col items-end gap-2.5 pr-1 min-[1100px]:flex">
+        <div className="absolute top-[170px] left-[max(calc(50%-635px),-140px)] z-0 hidden w-[340px] -rotate-4 flex-col items-end gap-2.5 pr-1 min-[1100px]:flex">
           <HeroPopover {...rewrite} imgClassName="w-full" />
         </div>
-        <div className="absolute top-11 right-[max(calc(50%-590px),-60px)] z-0 hidden w-[220px] rotate-4 flex-col items-start gap-2.5 pl-1 min-[1100px]:flex">
+        <div className="absolute top-11 right-[max(calc(50%-615px),-80px)] z-0 hidden w-[250px] rotate-4 flex-col items-start gap-2.5 pl-1 min-[1100px]:flex">
           <HeroPopover {...correction} imgClassName="w-full" pillFirst />
         </div>
-        <div className="absolute top-[370px] right-[max(calc(50%-620px),-100px)] z-0 hidden w-[290px] -rotate-2 flex-col items-start gap-2.5 pl-1 min-[1100px]:flex">
+        <div className="absolute top-[370px] right-[max(calc(50%-655px),-120px)] z-0 hidden w-[330px] -rotate-2 flex-col items-start gap-2.5 pl-1 min-[1100px]:flex">
           <HeroPopover {...transform} imgClassName="w-full" />
         </div>
 
@@ -70,13 +70,13 @@ export default function Hero() {
 
         {/* Popover strip — small screens */}
         <div className="mt-14 flex flex-wrap justify-center gap-7 min-[1100px]:hidden">
-          <Reveal className="flex w-[min(340px,88vw)] flex-col items-center gap-2.5">
+          <Reveal className="flex w-[min(380px,90vw)] flex-col items-center gap-2.5">
             <HeroPopover {...correction} imgClassName="w-[70%]" />
           </Reveal>
-          <Reveal delay={80} className="flex w-[min(340px,88vw)] flex-col items-center gap-2.5">
+          <Reveal delay={80} className="flex w-[min(380px,90vw)] flex-col items-center gap-2.5">
             <HeroPopover {...rewrite} imgClassName="w-full" />
           </Reveal>
-          <Reveal delay={160} className="flex w-[min(340px,88vw)] flex-col items-center gap-2.5">
+          <Reveal delay={160} className="flex w-[min(380px,90vw)] flex-col items-center gap-2.5">
             <HeroPopover {...transform} imgClassName="w-[90%]" />
           </Reveal>
         </div>

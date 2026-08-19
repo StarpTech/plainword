@@ -681,6 +681,38 @@ final class CorrectionPanelController {
         panel.orderOut(nil)
     }
 
+    /// Moves the panel with the source window it is anchored to.
+    ///
+    /// This is a translation rather than a re-anchor so it also carries a panel the user
+    /// has dragged: the proposal keeps the place the user put it relative to the text.
+    func translate(by delta: CGSize) {
+        guard abs(delta.width) >= 1 || abs(delta.height) >= 1 else { return }
+
+        anchor = anchor.offsetBy(dx: delta.width, dy: delta.height)
+        targetScreen = screen(containing: anchor)
+        let size = panel.frame.size
+        let origin = constrainedOrigin(
+            NSPoint(
+                x: panel.frame.origin.x + delta.width,
+                y: panel.frame.origin.y + delta.height
+            ),
+            for: size,
+            preferringMouseScreen: false
+        )
+        if userPositionedOrigin != nil {
+            userPositionedOrigin = origin
+        }
+        let frame = NSRect(origin: origin, size: size)
+        guard targetFrame != frame else { return }
+        targetFrame = frame
+        // A window drag emits a continuous stream of moves. Animating each one would
+        // leave the panel trailing behind the text it points at.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        panel.setFrame(frame, display: true)
+        CATransaction.commit()
+    }
+
     func reposition(near anchor: CGRect, animated: Bool) {
         let nextAnchor = normalizedAnchor(resolvedAnchor(anchor))
         let nextScreen = screen(containing: nextAnchor)
@@ -852,11 +884,17 @@ final class CorrectionPanelController {
         panel.setFrameOrigin(origin)
     }
 
-    private func constrainedOrigin(_ origin: NSPoint, for size: NSSize) -> NSPoint {
+    private func constrainedOrigin(
+        _ origin: NSPoint,
+        for size: NSSize,
+        preferringMouseScreen: Bool = true
+    ) -> NSPoint {
         let proposedFrame = NSRect(origin: origin, size: size)
-        let mouseScreen = NSScreen.screens.first {
-            $0.frame.contains(NSEvent.mouseLocation)
-        }
+        // Following a window is driven by the window, not by the pointer, which may be
+        // resting on another display and would otherwise pull the panel over to it.
+        let mouseScreen = preferringMouseScreen
+            ? NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) }
+            : nil
         let frameScreen = NSScreen.screens.max { lhs, rhs in
             let lhsIntersection = lhs.frame.intersection(proposedFrame)
             let rhsIntersection = rhs.frame.intersection(proposedFrame)

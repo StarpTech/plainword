@@ -6,6 +6,9 @@ enum AccessibilityObservedChange: Equatable {
     case valueChanged
     case selectionChanged
     case elementDestroyed
+    /// The window holding the focused element moved or was resized. A proposal is
+    /// anchored to text, so it has to travel with the window that draws it.
+    case windowGeometryChanged
 }
 
 /// Observes semantic changes in the active application's Accessibility tree.
@@ -16,6 +19,7 @@ final class AccessibilityChangeObserver {
     private var observer: AXObserver?
     private var applicationElement: AXUIElement?
     private var focusedElement: AXUIElement?
+    private var windowElement: AXUIElement?
     private var processIdentifier: pid_t?
     private var onChange: ((AccessibilityObservedChange) -> Void)?
 
@@ -67,6 +71,9 @@ final class AccessibilityChangeObserver {
             if let focusedElement {
                 removeFocusedNotifications(from: focusedElement, observer: observer)
             }
+            if let windowElement {
+                removeWindowNotifications(from: windowElement, observer: observer)
+            }
             if let applicationElement {
                 _ = AXObserverRemoveNotification(
                     observer,
@@ -89,6 +96,7 @@ final class AccessibilityChangeObserver {
         observer = nil
         applicationElement = nil
         focusedElement = nil
+        windowElement = nil
         processIdentifier = nil
         onChange = nil
     }
@@ -110,6 +118,8 @@ final class AccessibilityChangeObserver {
                 rebindFocusedElement()
             }
             onChange?(.elementDestroyed)
+        case kAXWindowMovedNotification, kAXWindowResizedNotification:
+            onChange?(.windowGeometryChanged)
         default:
             break
         }
@@ -121,7 +131,11 @@ final class AccessibilityChangeObserver {
         if let focusedElement {
             removeFocusedNotifications(from: focusedElement, observer: observer)
         }
+        if let windowElement {
+            removeWindowNotifications(from: windowElement, observer: observer)
+        }
         focusedElement = nil
+        windowElement = nil
 
         var element = focusedElement(from: applicationElement)
         if element == nil {
@@ -147,6 +161,30 @@ final class AccessibilityChangeObserver {
         addNotification(kAXValueChangedNotification, to: element)
         addNotification(kAXSelectedTextChangedNotification, to: element)
         addNotification(kAXUIElementDestroyedNotification, to: element)
+        bindWindow(of: element)
+    }
+
+    /// Follows the window that contains the focused element. Dragging or resizing it
+    /// moves the text without changing it, which no other notification reports.
+    private func bindWindow(of element: AXUIElement) {
+        guard let window = window(from: element) else { return }
+        windowElement = window
+        addNotification(kAXWindowMovedNotification, to: window)
+        addNotification(kAXWindowResizedNotification, to: window)
+    }
+
+    private func window(from element: AXUIElement) -> AXUIElement? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element,
+            kAXWindowAttribute as CFString,
+            &value
+        ) == .success,
+        let value,
+        CFGetTypeID(value) == AXUIElementGetTypeID() else {
+            return nil
+        }
+        return unsafeDowncast(value, to: AXUIElement.self)
     }
 
     private func focusedElement(from applicationElement: AXUIElement) -> AXUIElement? {
@@ -191,6 +229,22 @@ final class AccessibilityChangeObserver {
                 || result == .notificationAlreadyRegistered
                 || result == .notificationUnsupported else {
             return
+        }
+    }
+
+    private func removeWindowNotifications(
+        from element: AXUIElement,
+        observer: AXObserver
+    ) {
+        for notification in [
+            kAXWindowMovedNotification,
+            kAXWindowResizedNotification
+        ] {
+            _ = AXObserverRemoveNotification(
+                observer,
+                element,
+                notification as CFString
+            )
         }
     }
 

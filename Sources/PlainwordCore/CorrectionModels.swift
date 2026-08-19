@@ -42,12 +42,14 @@ public struct WritingProfile: Codable, Equatable, Sendable {
 
 public struct CorrectionResponse: Codable, Equatable, Sendable {
     public let correctedText: String
-    public let classification: WritingSuggestionKind
+    /// Absent when the provider returned no usable classification. Consumers pass it
+    /// to `WritingSuggestionPlanner`, which falls back to the shape of the diff.
+    public let classification: WritingSuggestionKind?
     public let summary: String?
 
     public init(
         correctedText: String,
-        classification: WritingSuggestionKind,
+        classification: WritingSuggestionKind?,
         summary: String? = nil
     ) {
         self.correctedText = correctedText
