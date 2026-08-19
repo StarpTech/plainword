@@ -1044,29 +1044,46 @@ private final class CorrectionPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-private struct PlainwordLoadingSpinner: View {
+private struct PlainwordLoadingMark: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var isRotating = false
+    @State private var isAnimating = false
+
+    var size: CGFloat = 22
 
     var body: some View {
-        Circle()
-            .trim(from: 0.12, to: 0.82)
-            .stroke(
-                colorScheme == .dark ? Color.white : Color.black.opacity(0.82),
-                style: StrokeStyle(lineWidth: 2, lineCap: .round)
+        PlainwordBrandMark(size: size)
+            .scaleEffect(reduceMotion ? 1 : (isAnimating ? 1 : 0.92))
+            .shadow(
+                color: PlainwordTheme.accent.opacity(isAnimating ? 0.55 : 0.2),
+                radius: isAnimating ? size * 0.28 : size * 0.12
             )
-            .rotationEffect(.degrees(isRotating ? 360 : 0))
             .animation(
                 reduceMotion
                     ? nil
-                    : .linear(duration: 0.72).repeatForever(autoreverses: false),
-                value: isRotating
+                    : .easeInOut(duration: 0.82).repeatForever(autoreverses: true),
+                value: isAnimating
             )
-            .frame(width: 14, height: 14)
-            .onAppear { isRotating = !reduceMotion }
+            .overlay {
+                if !reduceMotion {
+                    LinearGradient(
+                        colors: [.clear, Color.white.opacity(0.9), .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(width: size * 0.32, height: size * 1.6)
+                    .rotationEffect(.degrees(24))
+                    .offset(x: isAnimating ? size * 1.25 : -size * 1.25)
+                    .animation(
+                        .linear(duration: 1.15).repeatForever(autoreverses: false),
+                        value: isAnimating
+                    )
+                    .mask(PlainwordBrandMark(size: size))
+                }
+            }
+            .frame(width: size, height: size)
+            .onAppear { isAnimating = !reduceMotion }
             .onChange(of: reduceMotion) { _, shouldReduceMotion in
-                isRotating = !shouldReduceMotion
+                isAnimating = !shouldReduceMotion
             }
             .accessibilityHidden(true)
     }
@@ -1126,7 +1143,7 @@ private struct CrossAppProposalView: View {
             } label: {
                 Group {
                     if model.phase == .promptTriggerLoading {
-                        PlainwordLoadingSpinner()
+                        PlainwordLoadingMark(size: 24)
                     } else {
                         PlainwordBrandMark(size: 24)
                     }
@@ -1223,7 +1240,7 @@ private struct CrossAppProposalView: View {
 
             HStack(spacing: 8) {
                 if model.isWorking {
-                    PlainwordLoadingSpinner()
+                    PlainwordLoadingMark(size: 21)
                         .frame(width: 21, height: 21)
                 } else {
                     PlainwordBrandMark(size: 21)

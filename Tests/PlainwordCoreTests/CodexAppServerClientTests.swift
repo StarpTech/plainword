@@ -57,10 +57,12 @@ final class CodexAppServerClientTests: XCTestCase {
         XCTAssertEqual(correction.correctedText, "This is a connection test.")
         XCTAssertEqual(correction.classification, .correction)
 
-        let launches = try String(contentsOf: launchLog, encoding: .utf8)
+        let transcript = try String(contentsOf: launchLog, encoding: .utf8)
+        let launches = transcript
             .split(whereSeparator: \.isNewline)
             .filter { $0 == "launch" }
         XCTAssertEqual(launches.count, 1)
+        XCTAssertTrue(transcript.contains("\"test-mcp\":{\"enabled\":false}"))
     }
 
     func testCodexSettingsUseAppServerWithoutCredentials() {
@@ -80,7 +82,8 @@ final class CodexAppServerClientTests: XCTestCase {
     func testTurnUsesEphemeralReadOnlyThreadAndStrictOutputSchema() {
         let thread = CodexAppServerClient.threadParameters(
             systemPrompt: "Edit text.",
-            model: "test-model"
+            model: "test-model",
+            disabledMCPServerNames: ["railway", "openaiDeveloperDocs"]
         )
         let turn = CodexAppServerClient.turnParameters(
             threadID: "thread-1",
@@ -96,6 +99,26 @@ final class CodexAppServerClientTests: XCTestCase {
         XCTAssertEqual(thread["config"]?["features"]?["apps"], .bool(false))
         XCTAssertEqual(thread["config"]?["features"]?["multi_agent"], .bool(false))
         XCTAssertEqual(thread["config"]?["features"]?["shell_tool"], .bool(false))
+        XCTAssertEqual(thread["developerInstructions"], .string(""))
+        XCTAssertEqual(thread["personality"], .string("none"))
+        XCTAssertEqual(thread["config"]?["include_apps_instructions"], .bool(false))
+        XCTAssertEqual(
+            thread["config"]?["include_collaboration_mode_instructions"],
+            .bool(false)
+        )
+        XCTAssertEqual(thread["config"]?["include_environment_context"], .bool(false))
+        XCTAssertEqual(thread["config"]?["include_permissions_instructions"], .bool(false))
+        XCTAssertEqual(thread["config"]?["skills"]?["include_instructions"], .bool(false))
+        XCTAssertEqual(thread["config"]?["skills"]?["bundled"]?["enabled"], .bool(false))
+        XCTAssertEqual(thread["config"]?["web_search"], .string("disabled"))
+        XCTAssertEqual(
+            thread["config"]?["mcp_servers"]?["railway"]?["enabled"],
+            .bool(false)
+        )
+        XCTAssertEqual(
+            thread["config"]?["mcp_servers"]?["openaiDeveloperDocs"]?["enabled"],
+            .bool(false)
+        )
         XCTAssertEqual(turn["effort"], .string("low"))
         XCTAssertEqual(
             turn["outputSchema"]?["properties"]?["classification"]?["enum"],
@@ -175,6 +198,9 @@ final class CodexAppServerClientTests: XCTestCase {
           case "$line" in
             *'"method":"initialize"'*)
               printf '{"id":%s,"result":{}}\\n' "$request_id"
+              ;;
+            *'"method":"config/read"'*)
+              printf '{"id":%s,"result":{"config":{"mcp_servers":{"test-mcp":{"enabled":true}}},"origins":{}}}\\n' "$request_id"
               ;;
             *'"method":"account/read"'*)
               printf '{"id":%s,"result":{"account":{"type":"chatgpt","email":"writer@example.com","planType":"plus"},"requiresOpenaiAuth":true}}\\n' "$request_id"

@@ -164,6 +164,11 @@ enum CodexJSONValue: Codable, Equatable, Sendable {
         guard case .array(let value) = self else { return nil }
         return value
     }
+
+    var objectValue: [String: CodexJSONValue]? {
+        guard case .object(let value) = self else { return nil }
+        return value
+    }
 }
 
 private struct CodexIncomingMessage: Decodable {
@@ -268,6 +273,7 @@ public actor CodexAppServerClient {
     private var pendingRequests: [Int: PendingRequest] = [:]
     private var activeTurns: [String: ActiveTurn] = [:]
     private var cancelledThreadIDs: Set<String> = []
+    private var configuredMCPServerNames: [String] = []
 
     public init(
         executableURL: URL? = nil,
@@ -479,22 +485,45 @@ public actor CodexAppServerClient {
 
     static func threadParameters(
         systemPrompt: String,
-        model: String
+        model: String,
+        disabledMCPServerNames: [String] = []
     ) -> CodexJSONValue {
+        var config: [String: CodexJSONValue] = [
+            "features": .object(
+                Dictionary(
+                    uniqueKeysWithValues: disabledAgentFeatures.map { ($0, .bool(false)) }
+                )
+            ),
+            "include_apps_instructions": .bool(false),
+            "include_collaboration_mode_instructions": .bool(false),
+            "include_environment_context": .bool(false),
+            "include_permissions_instructions": .bool(false),
+            "personality": .string("none"),
+            "skills": .object([
+                "include_instructions": .bool(false),
+                "bundled": .object(["enabled": .bool(false)])
+            ]),
+            "web_search": .string("disabled")
+        ]
+        if !disabledMCPServerNames.isEmpty {
+            config["mcp_servers"] = .object(
+                Dictionary(
+                    uniqueKeysWithValues: disabledMCPServerNames.map {
+                        ($0, .object(["enabled": .bool(false)]))
+                    }
+                )
+            )
+        }
         var values: [String: CodexJSONValue] = [
             "serviceName": .string("plainword"),
             "baseInstructions": .string(systemPrompt),
+            "developerInstructions": .string(""),
+            "personality": .string("none"),
             "cwd": .string(FileManager.default.temporaryDirectory.path),
             "approvalPolicy": .string("never"),
             "sandbox": .string("read-only"),
             "ephemeral": .bool(true),
-            "config": .object([
-                "features": .object(
-                    Dictionary(
-                        uniqueKeysWithValues: disabledAgentFeatures.map { ($0, .bool(false)) }
-                    )
-                )
-            ])
+            "config": .object(config)
         ]
         if !model.isEmpty {
             values["model"] = .string(model)
@@ -559,7 +588,11 @@ public actor CodexAppServerClient {
         try await ensureStarted()
         let threadResult = try await request(
             method: "thread/start",
-            params: Self.threadParameters(systemPrompt: systemPrompt, model: model)
+            params: Self.threadParameters(
+                systemPrompt: systemPrompt,
+                model: model,
+                disabledMCPServerNames: configuredMCPServerNames
+            )
         )
         guard let threadID = threadResult["thread"]?["id"]?.stringValue else {
             throw CodexAppServerClientError.invalidResponse
@@ -724,10 +757,25 @@ public actor CodexAppServerClient {
             )
             try sendNotification(method: "initialized", params: .object([:]))
             isInitialized = true
+            await discoverConfiguredMCPServers()
         } catch {
             stopProcess()
             throw error
         }
+    }
+
+    private func discoverConfiguredMCPServers() async {
+        let result = try? await sendRequest(
+            method: "config/read",
+            params: .object([
+                "cwd": .string(FileManager.default.temporaryDirectory.path),
+                "includeLayers": .bool(false)
+            ])
+        )
+        configuredMCPServerNames = result?["config"]?["mcp_servers"]?
+            .objectValue?
+            .keys
+            .sorted() ?? []
     }
 
     private func request(
@@ -940,6 +988,7 @@ public actor CodexAppServerClient {
         )
         runningProcess = nil
         isInitialized = false
+        configuredMCPServerNames = []
         failAll(with: error)
     }
 
@@ -992,6 +1041,7 @@ public actor CodexAppServerClient {
         runningProcess = nil
         isInitialized = false
         startupTask = nil
+        configuredMCPServerNames = []
     }
 
     private var standardErrorDescription: String? {
