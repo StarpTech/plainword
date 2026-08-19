@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+@theme {
+  --color-canvas: #f7f7f8;
+  --color-ink: #242428;
+  --color-ink-soft: #6f6f76;
+  --color-ink-faint: #929299;
+  --color-line: #e2e2e5;
+  --color-brand: #6256c4;
+  --color-brand-strong: #5045a8;
+  --color-brand-muted: #eceaf8;
+  --color-lavender: #c6aeff;
+  --color-sky: #7dc8ff;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+body {
+  @apply bg-canvas font-sans text-ink antialiased;
+}
+
+::selection {
+  @apply bg-brand-muted;
+}

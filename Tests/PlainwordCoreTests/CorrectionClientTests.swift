@@ -27,6 +27,56 @@ final class ChatCompletionsClientTests: XCTestCase {
         }
     }
 
+    func testRejectsInvalidRequestConfigurationBeforeSending() {
+        let client = ChatCompletionsClient()
+        let cases: [(settings: LLMSettings, apiKey: String?, error: ChatCompletionsClientError)] = [
+            (
+                LLMSettings(endpoint: "not a URL", model: "model"),
+                "secret",
+                .invalidEndpoint
+            ),
+            (
+                LLMSettings(endpoint: "https://example.com", model: "  "),
+                "secret",
+                .missingModel
+            ),
+            (
+                LLMSettings(endpoint: "https://example.com", model: "model"),
+                "  ",
+                .missingCredential
+            ),
+            (
+                LLMSettings(endpoint: "https://example.com", model: "model"),
+                "secret\nvalue",
+                .invalidCredential
+            ),
+            (
+                LLMSettings(
+                    endpoint: "https://example.com",
+                    model: "model",
+                    authentication: .customHeader,
+                    customHeaderName: "API Key"
+                ),
+                "secret",
+                .invalidHeaderName
+            )
+        ]
+
+        for testCase in cases {
+            XCTAssertThrowsError(
+                try client.makeRequest(
+                    text: "hello",
+                    profile: WritingProfile(),
+                    locale: "en-US",
+                    settings: testCase.settings,
+                    apiKey: testCase.apiKey
+                )
+            ) { error in
+                XCTAssertEqual(error as? ChatCompletionsClientError, testCase.error)
+            }
+        }
+    }
+
     func testBuildsBearerChatCompletionsRequest() throws {
         let client = ChatCompletionsClient()
         let request = try client.makeRequest(
@@ -261,6 +311,46 @@ final class ChatCompletionsClientTests: XCTestCase {
         )
     }
 
+    func testStreamingFallsBackToAStandardJSONResponse() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StreamingURLProtocol.self]
+        let client = ChatCompletionsClient(
+            session: URLSession(configuration: configuration)
+        )
+
+        StreamingURLProtocol.handler = { request in
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            let body = #"{"choices":[{"message":{"content":"{\"corrected_text\":\"Hello world\",\"classification\":\"correction\"}"}}]}"#
+            return (response, Data(body.utf8))
+        }
+
+        var updates: [CorrectionResponse] = []
+        for try await update in client.streamCorrection(
+            text: "Helo world",
+            profile: WritingProfile(),
+            locale: "en-US",
+            settings: LLMSettings(
+                endpoint: "https://example.com/v1/chat/completions",
+                model: "provider-model"
+            ),
+            apiKey: "test-key"
+        ) {
+            updates.append(update)
+        }
+
+        XCTAssertEqual(
+            updates,
+            [CorrectionResponse(correctedText: "Hello world", classification: .correction)]
+        )
+    }
+
     func testCancelsOversizedStreamingCorrection() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StreamingURLProtocol.self]
@@ -317,6 +407,48 @@ final class ChatCompletionsClientTests: XCTestCase {
             response.choices.first?.message.content,
             #"{"corrected_text":"Hello.","classification":"correction"}"#
         )
+    }
+
+    func testStructuredCorrectionPreservesOriginalOuterWhitespace() throws {
+        let response = try ChatCompletionsClient.decodeStructuredCorrection(
+            #"{"corrected_text":"  Hello world.  ","classification":"correction"}"#,
+            original: "\n  Helo world. \t",
+            summary: "Neutral · Clear"
+        )
+
+        XCTAssertEqual(
+            response,
+            CorrectionResponse(
+                correctedText: "\n  Hello world. \t",
+                classification: .correction,
+                summary: "Neutral · Clear"
+            )
+        )
+    }
+
+    func testStructuredCorrectionRejectsInvalidAndEmptyResults() {
+        let cases: [(rawValue: String, error: ChatCompletionsClientError)] = [
+            (
+                #"{"corrected_text":"Hello","classification":"unknown"}"#,
+                .invalidResponse
+            ),
+            (
+                #"{"corrected_text":"   ","classification":"correction"}"#,
+                .emptyCorrection
+            ),
+            ("not JSON", .invalidResponse)
+        ]
+
+        for testCase in cases {
+            XCTAssertThrowsError(
+                try ChatCompletionsClient.decodeStructuredCorrection(
+                    testCase.rawValue,
+                    original: "Hello"
+                )
+            ) { error in
+                XCTAssertEqual(error as? ChatCompletionsClientError, testCase.error)
+            }
+        }
     }
 
     func testDebugEventsCapturePayloadAndRedactCredentials() async throws {

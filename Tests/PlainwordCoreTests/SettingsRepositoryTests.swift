@@ -78,4 +78,36 @@ final class SettingsRepositoryTests: XCTestCase {
             )
         )
     }
+
+    func testInvalidPersistedEnumValuesFallBackWithoutDiscardingValidValues() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.set("unknown-tone", forKey: "writingProfile.tone")
+        defaults.set(WritingStyle.formal.rawValue, forKey: "writingProfile.style")
+        defaults.set("unknown-provider", forKey: "llm.provider")
+        defaults.set(ProviderAuthentication.none.rawValue, forKey: "llm.authentication")
+        defaults.set("unknown-thinking-mode", forKey: "llm.thinkingMode")
+        defaults.set("unknown-language-mode", forKey: "spelling.languageMode")
+        defaults.set("fr", forKey: "spelling.fixedLanguage")
+
+        let repository = SettingsRepository(suiteName: suiteName)
+
+        XCTAssertEqual(repository.profile.tone, .neutral)
+        XCTAssertEqual(repository.profile.style, .formal)
+        XCTAssertEqual(repository.llmSettings.provider, .openAICompatible)
+        XCTAssertEqual(repository.llmSettings.authentication, .none)
+        XCTAssertEqual(repository.llmSettings.thinkingMode, .low)
+        XCTAssertEqual(repository.spellingLanguageSettings.mode, .automatic)
+        XCTAssertEqual(repository.spellingLanguageSettings.fixedLanguageIdentifier, "fr")
+    }
+
+    func testSavingLLMSettingsRemovesLegacyTemperaturePreferences() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.set(true, forKey: "llm.sendsTemperature")
+        defaults.set(0.7, forKey: "llm.temperature")
+
+        SettingsRepository(suiteName: suiteName).llmSettings = LLMSettings()
+
+        XCTAssertNil(defaults.object(forKey: "llm.sendsTemperature"))
+        XCTAssertNil(defaults.object(forKey: "llm.temperature"))
+    }
 }

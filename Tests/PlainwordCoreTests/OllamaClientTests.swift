@@ -53,6 +53,44 @@ final class OllamaClientTests: XCTestCase {
         }
     }
 
+    func testRejectsMalformedSuccessfulResponse() async {
+        let client = makeClient()
+        OllamaURLProtocol.handler = { request in
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(#"{"models":"not-an-array"}"#.utf8))
+        }
+
+        await assertModelsFail(client, with: .invalidResponse)
+    }
+
+    func testMapsTransportFailureToUnavailable() async {
+        let client = makeClient()
+        OllamaURLProtocol.handler = { _ in
+            throw URLError(.cannotConnectToHost)
+        }
+
+        await assertModelsFail(client, with: .unavailable)
+    }
+
+    private func assertModelsFail(
+        _ client: OllamaClient,
+        with expectedError: OllamaClientError
+    ) async {
+        do {
+            _ = try await client.models()
+            XCTFail("Expected \(expectedError)")
+        } catch {
+            XCTAssertEqual(error as? OllamaClientError, expectedError)
+        }
+    }
+
     private func makeClient() -> OllamaClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [OllamaURLProtocol.self]
