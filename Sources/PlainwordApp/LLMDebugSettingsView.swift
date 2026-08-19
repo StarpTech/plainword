@@ -33,7 +33,10 @@ struct LLMDebugSettingsView: View {
                 if logStore.entries.isEmpty {
                     emptyState
                 } else {
-                    LazyVStack(spacing: 10) {
+                    // Debug rows can grow substantially when their payloads are expanded.
+                    // Keeping their layout alive prevents LazyVStack from changing its
+                    // height estimate mid-scroll and making the scroll position jump.
+                    VStack(spacing: 10) {
                         ForEach(logStore.entries) { entry in
                             LLMCallDebugView(entry: entry)
                         }
@@ -116,8 +119,11 @@ private struct LLMCallDebugView: View {
                 }
 
                 DisclosureGroup("Raw JSON payload", isExpanded: $showsRawPayload) {
-                    debugText(entry.request.payloadJSON)
-                        .padding(.top, 8)
+                    debugTextBlock(
+                        title: "Request payload",
+                        text: entry.request.payloadJSON
+                    )
+                    .padding(.top, 8)
                 }
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(PlainwordTheme.textSecondary)
@@ -265,16 +271,50 @@ private struct LLMCallDebugView: View {
     }
 
     private func debugText(_ text: String) -> some View {
-        Text(text.isEmpty ? "<empty>" : text)
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(PlainwordTheme.textPrimary)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(11)
-            .background(
-                PlainwordTheme.raisedSurface.opacity(0.7),
-                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-            )
+        let preview = Self.boundedPreview(of: text)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(preview.text)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(PlainwordTheme.textPrimary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if preview.isTruncated {
+                Label(
+                    "Preview truncated to keep the debug view responsive. "
+                        + "Copy includes the complete contents.",
+                    systemImage: "ellipsis.rectangle"
+                )
+                .font(.caption)
+                .foregroundStyle(PlainwordTheme.textSecondary)
+            }
+        }
+        .padding(11)
+        .background(
+            PlainwordTheme.raisedSurface.opacity(0.7),
+            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+        )
+    }
+
+    private static func boundedPreview(of text: String) -> (text: String, isTruncated: Bool) {
+        guard !text.isEmpty else {
+            return ("<empty>", false)
+        }
+
+        let maximumCharacterCount = 20_000
+        guard let endIndex = text.index(
+            text.startIndex,
+            offsetBy: maximumCharacterCount,
+            limitedBy: text.endIndex
+        ) else {
+            return (text, false)
+        }
+        guard endIndex != text.endIndex else {
+            return (text, false)
+        }
+
+        return (String(text[..<endIndex]), true)
     }
 
     private var statusBadge: some View {

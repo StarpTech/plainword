@@ -6,11 +6,11 @@ export default function VoiceSection() {
       <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] items-center gap-[clamp(28px,5vw,56px)]">
         <div>
           <h2 className="mb-4 text-[clamp(26px,4vw,32px)] font-bold tracking-tight text-balance">
-            Make it sound like you.
+            Teach it how you write.
           </h2>
           <p className="mb-6 leading-relaxed text-pretty text-ink-soft">
-            Set the tone and style once, and every suggestion follows it. Add your own standing
-            instructions — they&rsquo;re appended to every writing request.
+            Set tone and style once and every suggestion follows it. Standing instructions go along
+            with every request, so you stop repeating the same correction.
           </p>
           <dl className="flex flex-col gap-3.5">
             {VOICE_ROWS.map((row) => (

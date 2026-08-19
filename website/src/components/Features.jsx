@@ -1,21 +1,21 @@
-import { AppWindow, MessagesSquare, WandSparkles } from 'lucide-react';
+import { Cpu, MessagesSquare, WandSparkles } from 'lucide-react';
 import { APP_CHIPS } from '../content.js';
 
 const FEATURES = [
   {
-    icon: AppWindow,
-    title: 'Works where you write',
-    text: 'No separate editor, no copy-pasting into a chatbot. Get suggestions directly in the app you\u2019re already using.',
+    icon: WandSparkles,
+    title: 'Writes in your tone and style',
+    text: 'Pick a tone and style, add standing instructions like \u201CBritish English, no semicolons\u201D, and every suggestion follows them. Or type a one-off instruction and run it again until it fits.',
   },
   {
     icon: MessagesSquare,
-    title: 'Understands the conversation',
-    text: 'Plainword reads the surrounding context, so a reply to your team sounds like a reply \u2014 not generic AI copy.',
+    title: 'Uses the text around your cursor',
+    text: 'Plainword sends the selection plus the surrounding paragraph and whatever context the app exposes. A reply in a thread is edited as a reply, not as an isolated sentence.',
   },
   {
-    icon: WandSparkles,
-    title: 'Yours to program',
-    text: 'Customize tone and style, or transform text with your own prompts until it fits. Your voice stays yours.',
+    icon: Cpu,
+    title: 'Runs on any LLM',
+    text: 'A local model through Ollama, your Codex subscription, or any OpenAI-compatible endpoint with your own key. Switch provider or model whenever you want.',
   },
 ];
 
@@ -35,11 +35,11 @@ export default function Features() {
   return (
     <section id="features" className="pb-24">
       <h2 className="mb-3 text-center text-[clamp(28px,4.5vw,36px)] font-bold tracking-tight">
-        Not another grammar tool.
+        What Plainword does
       </h2>
-      <p className="mx-auto mb-14 max-w-[520px] text-center text-[17px] text-pretty text-ink-soft">
-        Grammar tools propose changes that make no sense and can&rsquo;t be told otherwise.
-        Plainword is different: programmable, context-aware, and entirely under your control.
+      <p className="mx-auto mb-14 max-w-[560px] text-center text-[17px] text-pretty text-ink-soft">
+        A spell checker knows the rules of a language. It doesn&rsquo;t know how you write, what the
+        thread above is about, or which model you want to use.
       </p>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(250px,1fr))] gap-5">
         {FEATURES.map((f) => (

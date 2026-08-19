@@ -27,15 +27,16 @@ export default function Providers() {
       <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] items-center gap-[clamp(28px,5vw,56px)] rounded-3xl border border-line bg-white p-[clamp(28px,5vw,56px)]">
         <div>
           <h2 className="mb-4 text-[clamp(26px,4vw,32px)] font-bold tracking-tight text-balance">
-            Your AI. Your rules.
+            Bring your own model.
           </h2>
           <p className="mb-5 leading-relaxed text-pretty text-ink-soft">
-            Use your preferred AI provider, run a model locally with Ollama for maximum privacy, or
-            use your Codex subscription. All works.
+            Point Plainword at whatever you already use: a local model through Ollama so your text
+            never leaves the Mac, the Codex subscription you&rsquo;re already paying for, or any
+            OpenAI-compatible API key. There is no Plainword subscription on top.
           </p>
           <p className="leading-relaxed text-ink-soft">
-            Plainword acts only when you ask, shows every suggestion before it&rsquo;s applied, and
-            never touches password fields, your clipboard, or your screen.
+            It runs only when you press the shortcut, shows every change before applying it, and
+            skips password fields. No clipboard, no screen capture, no background typing.
           </p>
         </div>
         <div className="flex flex-col gap-3">

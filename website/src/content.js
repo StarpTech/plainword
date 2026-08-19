@@ -9,45 +9,45 @@ export const HERO_POPOVERS = [
     id: 'correction',
     src: '/images/popover-correction.png',
     alt: "Plainword small correction popover suggesting That's with an Apply fix button",
-    caption: 'One-keystroke fixes',
+    caption: 'Small fixes, one keystroke',
   },
   {
     id: 'rewrite',
     src: '/images/popover-rewrite.png',
     alt: 'Plainword clarity suggestion showing a proposed edit with tracked changes',
-    caption: 'Rewrites you approve first',
+    caption: 'Rewrites shown before applying',
   },
   {
     id: 'transform',
     src: '/images/popover-transform.png',
     alt: 'Plainword transform popover where you type your own instruction',
-    caption: 'Your own prompts',
+    caption: 'Or just tell it what to do',
   },
 ];
 
 export const APP_CHIPS = ['macOS apps', 'Browser', 'WhatsApp', 'Slack', 'LinkedIn', 'and more'];
 
 export const VOICE_ROWS = [
-  { label: 'Tone', text: 'The emotional character of suggestions.' },
-  { label: 'Style', text: 'How suggestions are phrased and structured.' },
-  { label: 'Language', text: 'Works in any language — detected automatically.' },
-  { label: 'Instructions', text: '\u201CPrefer British English and avoid semicolons.\u201D' },
+  { label: 'Tone', text: 'How warm, direct or formal a suggestion sounds.' },
+  { label: 'Style', text: 'How it phrases and structures a sentence.' },
+  { label: 'Language', text: 'Any language, detected from what you wrote.' },
+  { label: 'Instructions', text: '\u201CBritish English, no semicolons, never start with \u2018I hope\u2019.\u201D' },
 ];
 
 export const PROVIDERS = [
   {
     name: 'Ollama — fully local',
-    text: 'Your writing never leaves your Mac.',
+    text: 'Nothing leaves your Mac. No account, no API key.',
     icons: [{ src: 'https://cdn.simpleicons.org/ollama/242428', alt: 'Ollama' }],
   },
   {
     name: 'Codex subscription',
-    text: 'Reuse the subscription you already pay for.',
+    text: 'Reuses your Codex CLI login. No second bill.',
     icons: [{ src: '/images/openai.svg', alt: 'Codex (OpenAI)' }],
   },
   {
     name: 'Any compatible provider',
-    text: 'Connect the OpenAI-compatible service you trust.',
+    text: 'Your own key, any OpenAI-compatible endpoint.',
     icons: [
       { src: 'https://cdn.simpleicons.org/anthropic/242428', alt: 'Anthropic', small: true },
       { src: 'https://cdn.simpleicons.org/mistralai/242428', alt: 'Mistral', small: true },

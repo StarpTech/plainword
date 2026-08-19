@@ -26,9 +26,9 @@ export default function Hero() {
         wherever you write.
       </h1>
       <p className="relative z-10 mx-auto mb-9 max-w-[560px] text-[clamp(16px,2.4vw,20px)] leading-normal text-pretty text-ink-soft">
-        Plainword improves your writing right where you type — in macOS apps, your browser,
-        WhatsApp, Slack, LinkedIn, and more. It understands the surrounding conversation, so
-        suggestions actually make sense.
+        Plainword fixes and rewrites text directly in macOS apps, your browser, WhatsApp, Slack and
+        LinkedIn. It writes in your tone and style, reads the conversation around your cursor for
+        context, and runs on any LLM you choose — local or hosted.
       </p>
       <div className="flex flex-wrap items-center justify-center gap-4">
         <a
@@ -43,7 +43,7 @@ export default function Hero() {
         <kbd className="rounded-md border border-line bg-white px-2 py-1 font-mono text-[13px] whitespace-nowrap shadow-sm">
           &#8984; F2
         </kbd>
-        <span>One shortcut. Suggestions appear, you decide.</span>
+        <span>Press it in any text field. Nothing changes until you say so.</span>
       </div>
 
       {/* Popover strip — small screens */}

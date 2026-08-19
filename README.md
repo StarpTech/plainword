@@ -2,51 +2,46 @@
   <img src="Resources/SharedAssets.xcassets/AppIcon.appiconset/AppIcon-1024.png" alt="Plainword app icon" width="128" height="128">
   <h1>Plainword</h1>
   <p><strong>Say what you mean, wherever you write.</strong></p>
-  <p>A private, on-demand writing companion for macOS.</p>
+  <p>A programmable writing assistant for macOS that runs on the AI provider of your choice.</p>
 </div>
 
-Plainword helps you improve a message, document, or post without pulling you out of the app you are already using. Select the words you want help with—or simply place your cursor in a paragraph—then press **Command–F2**. Plainword suggests a focused improvement and waits for your approval before changing anything. Press **Shift–Command–F2** to open transform mode directly for the selection or whole focused field.
+Plainword corrects, rewrites and transforms text directly in the app you are writing in — macOS text fields, browsers, Slack, WhatsApp, LinkedIn, mail clients. Select a phrase or put the cursor in a paragraph and press **Command–F2**: it proposes an edit and waits for you to accept it. Press **Shift–Command–F2** to give it an instruction of your own — "shorter", "less formal", "keep the second sentence" — on the selection or the whole focused field.
 
-## Better writing, without breaking your flow
+A spell checker knows the rules of a language. It does not know how you write, what the thread above is about, or which model you want to use.
 
-- **Write in your own apps.** Get help in supported macOS text fields instead of moving text into a separate editor.
-- **Stay in control.** Plainword works only when you ask and shows every suggestion before it is applied.
-- **Keep your voice.** Fix grammar and awkward phrasing, improve clarity, shorten text, adjust tone, or translate without turning your writing into generic AI copy.
-- **Choose how your text is processed.** Run a model locally with Ollama, use your signed-in Codex subscription, or connect an OpenAI-compatible provider you trust.
+## What it does
 
-## Two shortcuts, one writing flow
+- **Writes in your tone and style.** Pick a tone and style and add standing instructions such as "British English, no semicolons". Every request carries them, so suggestions sound like you instead of like generic AI output.
+- **Uses the text around your cursor.** Plainword sends the selection together with the surrounding paragraph and whatever context the app exposes through macOS, so a reply in a thread is edited as a reply rather than an isolated sentence.
+- **Runs on any LLM.** A local model through Ollama, your signed-in Codex subscription, or any OpenAI-compatible endpoint with your own key. Switch provider or model whenever you want; there is no Plainword subscription on top.
 
-1. **Choose the text.** Select a phrase or leave the cursor inside a paragraph.
-2. **Press Command–F2.** Plainword reviews only that selection or paragraph.
-3. **Review and accept.** See the proposed change beside your writing, then apply or dismiss it.
+## The two shortcuts
 
-Need a different kind of edit? Use the wand action to shorten the text, change its tone, translate it, and more. You can also save your preferred tone and writing style so suggestions feel consistent.
+1. **Pick the text.** Select a phrase or leave the cursor inside a paragraph.
+2. **Press Command–F2.** Plainword works on that selection or paragraph only.
+3. **Accept or dismiss.** Small corrections are marked in place; larger rewrites appear in a comparison card next to your writing.
 
-To skip the review and give Plainword an edit instruction immediately, press **Shift–Command–F2**. It transforms the exact selection when one exists and otherwise targets the whole focused field without changing the visible selection.
+**Shift–Command–F2** goes directly to the instruction prompt. It transforms the exact selection when there is one, and otherwise the whole focused field without changing what is visibly selected.
 
 <div align="center">
   <img src="docs/images/transform-entire-field.png" alt="Plainword transform popover targeting an entire focused field" width="600">
   <p><em>The transform shortcut opens the instruction prompt immediately; no provider request starts until you submit it.</em></p>
 </div>
 
-## Private by design
+## What it does not do
 
-Plainword stays quiet while you type. Typing and selecting text alone never opens the interface or contacts your chosen provider.
+Plainword stays inert while you type. Typing and selecting text never opens the interface or contacts your provider.
 
-- Every review starts with an action from you.
-- Suggestions are never applied automatically.
-- Password and protected fields are ignored.
-- Plainword does not use your clipboard or capture your screen.
-- Apps can be excluded at any time.
-- Provider credentials are stored securely in the macOS Keychain. Codex reuses the Codex CLI login instead of storing another credential.
-- With Ollama, your writing can be processed entirely on your Mac.
-
-## Built for the way you write
-
-Plainword understands selected text, the surrounding paragraph, and nearby context exposed by macOS. It can mark small corrections directly in the source and show larger rewrites in a compact comparison card. If an app cannot safely expose editable text, Plainword leaves it alone.
+- Every request starts with a keystroke from you.
+- Nothing is applied without your confirmation.
+- Password and secure fields are ignored.
+- No clipboard access, no screen capture.
+- Any app can be excluded.
+- Provider credentials live in the macOS Keychain. Codex reuses the Codex CLI login instead of storing a second credential.
+- With Ollama, your text is processed entirely on your Mac.
 
 > [!NOTE]
-> Plainword is currently an early macOS project. Compatibility varies because each app exposes its text fields differently.
+> Plainword is an early macOS project. Compatibility varies because each app exposes its text fields differently. If an app cannot safely expose editable text, Plainword leaves it alone.
 
 ## Download the preview
 
