@@ -83,7 +83,7 @@ export const RECOMMENDED_MODELS = [
     eyebrow: 'If privacy is not the constraint',
     name: 'Gemini 2.5 Flash-Lite',
     via: 'Any OpenAI-compatible key',
-    text: 'Clearly smarter than anything that fits on a laptop, and cheap enough that a month of writing costs less than a coffee. Your text goes to Google, so pick this for the writing you would not mind sending.',
+    text: 'Clearly smarter than anything that fits on a laptop, and a full month of writing costs less than one Starbucks coffee. Your text goes to Google, so pick this for the writing you would not mind sending.',
     points: [
       'Better at long threads and awkward rewrites',
       'Around $0.10 per million input tokens',
