@@ -24,7 +24,7 @@ actor ReadOnlyContextHarvester {
     /// field — are therefore at depth 1.
     private let maximumTraversalDepth = 13
     private let maximumAncestorDepth = 14
-    private let maximumFragments = 6
+    private let maximumFragments = 8
     private let minimumRelevance = 300
 
     private let headingRole = "AXHeading"

@@ -88,6 +88,29 @@ final class AccessibilityTextClient {
     private let maximumSurroundingContextLength = 240
     private let maximumCompleteTextReadLength = 12_000
     private let maximumRangeWindowLength = 2_400
+    /// Ceiling on how long a prompt may be before an equal value stops reading as an
+    /// echo of it. Prompts are a few words; an application that answers its accessible
+    /// name with the field's own contents should not make a long value look empty.
+    private let maximumPlaceholderPromptLength = 120
+    /// How many of an editor's own children are examined for the class that marks an
+    /// empty document. The mark sits on the first block; the rest are not worth the cost.
+    private let maximumEmptyEditorChildScan = 3
+    /// How much longer than its prompt a value may be and still read as an echo of it:
+    /// the newline Chromium reports for an empty paragraph, plus the spelled-out
+    /// ellipsis a drawn prompt carries where the accessible name leaves it off.
+    private let placeholderEchoSlack = 5
+    private let domClassListAttribute = "AXDOMClassList"
+    /// Classes a rich-text editor puts on an empty document while it draws its prompt.
+    /// Each one is that editor's own statement that the field holds nothing.
+    private let emptyEditorClassNames: Set<String> = [
+        // ProseMirror and Tiptap. Their per-node marker, "is-empty", also lands on a
+        // blank paragraph inside a document that has text elsewhere, so it is not here.
+        "is-editor-empty",
+        // Quill, on the editor root.
+        "ql-blank",
+        // CKEditor, on the element drawing the prompt.
+        "ck-placeholder"
+    ]
     private let standardTextRoles: Set<String> = [
         kAXTextFieldRole as String,
         kAXTextAreaRole as String,
@@ -913,39 +936,119 @@ final class AccessibilityTextClient {
         return rangeAttribute(kAXSelectedTextRangeAttribute, from: element)
     }
 
-    /// Reports whether an element is drawing its placeholder in place of a value.
+    /// Reports whether an element is drawing a prompt in place of a value.
     ///
     /// Chromium folds the generated content of an empty `contenteditable` into the
-    /// accessible text: `AXValue` answers with the placeholder, `AXNumberOfCharacters`
-    /// agrees, and the caret is reported at the end of it. None of that is text the user
-    /// wrote, so every read above treats such a field as empty. Correcting it would
-    /// otherwise propose a rewrite of a prompt nobody typed, and writing into it would
-    /// start from the placeholder's offsets rather than from an empty document.
+    /// accessible text: `AXValue` answers with the prompt and `AXNumberOfCharacters`
+    /// agrees. None of that is text the user wrote, so every read above treats such a
+    /// field as empty. Correcting it would otherwise propose a rewrite of a prompt nobody
+    /// typed, and writing into it would start from the prompt's offsets rather than from
+    /// an empty document.
+    ///
+    /// Two things can give a prompt away, and a host exposes one or the other. A web page
+    /// that sets `placeholder` or `aria-placeholder` gets `AXPlaceholderValue`, and the
+    /// value echoing it settles the question. A rich-text editor sets neither, so it is
+    /// taken at its word when it marks its own document empty.
     private func isShowingPlaceholder(_ element: AXUIElement) -> Bool {
         let metadata = multipleAttributeValues(
             [
                 kAXPlaceholderValueAttribute as String,
-                kAXNumberOfCharactersAttribute as String
+                kAXDescriptionAttribute as String,
+                kAXTitleAttribute as String,
+                kAXNumberOfCharactersAttribute as String,
+                domClassListAttribute
             ],
             from: element
         )
-        guard let placeholder = stringValue(metadata[kAXPlaceholderValueAttribute as String])?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !placeholder.isEmpty else {
+        let characterCount = integerValue(metadata[kAXNumberOfCharactersAttribute as String])
+        if isMarkedEmptyEditor(
+            element,
+            classList: metadata[domClassListAttribute],
+            characterCount: characterCount
+        ) {
+            return true
+        }
+
+        let prompts = [
+            kAXPlaceholderValueAttribute as String,
+            kAXDescriptionAttribute as String,
+            kAXTitleAttribute as String
+        ]
+            .compactMap { singleLine(stringValue(metadata[$0])) }
+            .filter { ($0 as NSString).length <= maximumPlaceholderPromptLength }
+        guard let longestPrompt = prompts.map({ ($0 as NSString).length }).max() else {
             return false
         }
-        // An echo is the placeholder itself, give or take the trailing newline Chromium
-        // reports for an empty paragraph. A longer field is holding text, and reading
-        // that text back to compare it would cost a round trip for nothing.
-        if let characterCount = integerValue(metadata[kAXNumberOfCharactersAttribute as String]),
-           characterCount > (placeholder as NSString).length + 2 {
+        // An echo is a prompt itself, give or take the slack below. A longer field is
+        // holding text, and reading that text back to compare it would cost a round trip
+        // for nothing.
+        if let characterCount, characterCount > longestPrompt + placeholderEchoSlack {
             return false
         }
-        guard let value = stringAttribute(kAXValueAttribute, from: element)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) else {
+        guard let value = normalizedPrompt(stringAttribute(kAXValueAttribute, from: element)) else {
             return false
         }
-        return value == placeholder
+        return prompts.contains { normalizedPrompt($0) == value }
+    }
+
+    /// Reports whether a rich-text editor has marked its own document empty while still
+    /// reporting the prompt it draws as its value.
+    ///
+    /// An editor of this kind draws its prompt as generated content inside the editable
+    /// node itself — the Electron chat composers Plainword meets are built this way — so
+    /// there is no prompt attribute to compare a value against, and the drawn text is
+    /// indistinguishable from writing by every other measure the Accessibility API
+    /// offers. What these editors do publish is the class they put on an empty document,
+    /// which is the same fact stated by the one party that knows it.
+    ///
+    /// The class sits on the editor itself for some and on the blank paragraph inside it
+    /// for others, so both are examined. Only classes meaning *the document* is empty
+    /// count: an editor also marks a blank paragraph in the middle of a full document,
+    /// and reading that as an empty field would discard the text around it.
+    private func isMarkedEmptyEditor(
+        _ element: AXUIElement,
+        classList: Any?,
+        characterCount: Int?
+    ) -> Bool {
+        // Absent outside a web view, which is the cheap way to leave native fields alone.
+        guard let ownClasses = stringArrayValue(classList) else { return false }
+        if ownClasses.contains(where: emptyEditorClassNames.contains) { return true }
+        // Only a prompt's worth of text can be a prompt, and a longer document does not
+        // deserve the round trips below either.
+        guard let characterCount, characterCount <= maximumPlaceholderPromptLength else {
+            return false
+        }
+        return uiElementArray(attributeValue(kAXChildrenAttribute, from: element))
+            .prefix(maximumEmptyEditorChildScan)
+            .contains { child in
+                stringArrayValue(attributeValue(domClassListAttribute, from: child))?
+                    .contains(where: emptyEditorClassNames.contains) ?? false
+            }
+    }
+
+    /// Reduces a prompt or a field value to the form the two can be compared in.
+    ///
+    /// The same prompt reaches different attributes spelled differently: the value an
+    /// editor reports carries the trailing ellipsis it draws and the line break of its
+    /// empty paragraph, where the accessible name carries neither. Returns `nil` for
+    /// anything that holds no text, which is not a prompt at all.
+    private func normalizedPrompt(_ text: String?) -> String? {
+        guard let collapsed = singleLine(text) else { return nil }
+        var trimmed = collapsed[...]
+        while trimmed.hasSuffix("\u{2026}") || trimmed.hasSuffix("...") {
+            trimmed = trimmed.hasSuffix("\u{2026}") ? trimmed.dropLast() : trimmed.dropLast(3)
+            while trimmed.last?.isWhitespace == true { trimmed = trimmed.dropLast() }
+        }
+        return trimmed.isEmpty ? nil : String(trimmed)
+    }
+
+    private func singleLine(_ text: String?) -> String? {
+        guard let text else { return nil }
+        let collapsed = text
+            .replacingOccurrences(of: "\u{00a0}", with: " ")
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        return collapsed.isEmpty ? nil : collapsed
     }
 
     /// Used only after Plainword has deliberately changed the source selection while
@@ -1084,6 +1187,10 @@ final class AccessibilityTextClient {
 
     private func integerValue(_ value: Any?) -> Int? {
         AccessibilityElementReader.integerValue(value)
+    }
+
+    private func stringArrayValue(_ value: Any?) -> [String]? {
+        value as? [String]
     }
 
     private func axValue(_ value: Any?) -> AXValue? {

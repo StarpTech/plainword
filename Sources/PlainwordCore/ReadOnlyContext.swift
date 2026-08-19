@@ -107,7 +107,7 @@ public enum ReadOnlyContextRanker {
         from candidates: [ReadOnlyContextCandidate],
         excluding excludedTexts: [String] = [],
         maximumUTF16Length: Int,
-        maximumFragments: Int = 6,
+        maximumFragments: Int = 8,
         minimumRelevance: Int = 300
     ) -> [ReadOnlyContextFragment] {
         guard maximumUTF16Length > 0, maximumFragments > 0 else { return [] }

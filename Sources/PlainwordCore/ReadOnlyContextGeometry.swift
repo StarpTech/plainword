@@ -24,7 +24,7 @@ public enum ReadOnlyContextGeometry {
     /// away horizontally belongs to a different column of the layout.
     public static let maximumSideLabelGap: CGFloat = 120
 
-    public static let maximumBudgetUTF16Length = 2_500
+    public static let maximumBudgetUTF16Length = 3_000
 
     // MARK: - Search bounds
 
@@ -116,11 +116,11 @@ public enum ReadOnlyContextGeometry {
         let budget: Int
         switch targetUTF16Length {
         case ...120:
-            budget = 2_000
+            budget = 2_600
         case ...400:
-            budget = 1_500
+            budget = 1_900
         default:
-            budget = 900
+            budget = 1_100
         }
         return min(maximumBudgetUTF16Length, budget)
     }
