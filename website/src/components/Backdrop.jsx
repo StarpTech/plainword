@@ -1,19 +1,14 @@
 /**
- * Ambient glows behind the whole page (from the app's PlainwordBackdrop).
- * Spread down the full document so the lower sections keep the same
- * atmosphere as the hero rather than falling flat onto bare canvas.
- * Clips itself, so ancestors stay free to use position: sticky.
- *
- * The glows are deliberately smaller and fainter on narrow screens, because at
- * full size a single blob covers a phone viewport and tints the whole page.
+ * Paper, not glass. The Ink system has no ambient glow — what it has is a
+ * canvas that is slightly warmer at the top of the page, and a single faint
+ * ink wash behind the hero. Everything else on the page provides its own edge.
  */
 export default function Backdrop() {
   return (
     <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-      <div className="absolute -top-[180px] -right-24 h-[320px] w-[380px] animate-drift rounded-full bg-lavender opacity-[0.14] blur-[70px] sm:-top-[260px] sm:-right-40 sm:h-[560px] sm:w-[760px] sm:opacity-25 sm:blur-[90px]" />
-      <div className="absolute top-[520px] -left-[200px] h-[300px] w-[360px] animate-drift-slow rounded-full bg-sky opacity-[0.10] blur-[80px] sm:-left-[280px] sm:h-[520px] sm:w-[640px] sm:opacity-[0.18] sm:blur-[100px]" />
-      <div className="absolute top-[1500px] -right-[200px] h-[320px] w-[360px] animate-drift-slow rounded-full bg-lavender opacity-[0.08] blur-[80px] sm:-right-[280px] sm:h-[560px] sm:w-[620px] sm:opacity-[0.14] sm:blur-[110px]" />
-      <div className="absolute bottom-[240px] -left-[220px] h-[300px] w-[340px] animate-drift rounded-full bg-brand opacity-[0.03] blur-[90px] sm:-left-[320px] sm:h-[440px] sm:w-[520px] sm:opacity-[0.04] sm:blur-[120px]" />
+      <div className="absolute inset-x-0 top-0 h-[720px] bg-gradient-to-b from-surface/70 to-transparent" />
+      <div className="absolute -top-[220px] left-1/2 h-[520px] w-[900px] -translate-x-1/2 rounded-full bg-accent opacity-[0.04] blur-[110px]" />
+      <div className="absolute top-[1600px] -right-[240px] h-[420px] w-[520px] rounded-full bg-accent opacity-[0.03] blur-[120px]" />
     </div>
   );
 }

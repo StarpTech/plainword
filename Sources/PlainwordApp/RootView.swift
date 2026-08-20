@@ -18,103 +18,157 @@ struct RootView: View {
             }
         }
 
+        /// SF Symbols rather than the handoff's typographic marks: those characters
+        /// come from whichever font on the system happens to carry them, so they
+        /// arrive at inconsistent weights and far below their nominal size.
         var systemImage: String {
             switch self {
             case .general: "gearshape"
-            case .provider: "server.rack"
-            case .writing: "pencil.and.outline"
-            case .debug: "ladybug"
+            case .provider: "bolt.horizontal"
+            case .writing: "pencil"
+            case .debug: "number"
             }
         }
     }
 
     @EnvironmentObject private var settings: SettingsStore
+    @Environment(\.colorScheme) private var colorScheme
     @State private var selection: AppSection = .general
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        ZStack {
-            PlainwordBackdrop()
+        HStack(spacing: 0) {
+            sidebar
 
-            NavigationSplitView(columnVisibility: $columnVisibility) {
-                VStack(spacing: 0) {
-                    HStack(spacing: 10) {
-                        PlainwordBrandMark(size: 32)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Plainword")
-                                .font(.system(size: 15, weight: .semibold, design: .rounded))
-                                .foregroundStyle(PlainwordTheme.textPrimary)
-                            Text("Writing assistant")
-                                .font(.system(size: 10))
-                                .foregroundStyle(PlainwordTheme.textSecondary)
-                        }
-                        Spacer()
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.top, 14)
-                    .padding(.bottom, 15)
+            Rectangle()
+                .fill(PlainwordTheme.separator)
+                .frame(width: 1)
 
-                    Rectangle()
-                        .fill(PlainwordTheme.separator.opacity(0.55))
-                        .frame(height: 1)
-                        .padding(.horizontal, 10)
-
-                    VStack(spacing: 5) {
-                        ForEach(AppSection.allCases) { section in
-                            sidebarButton(section)
-                        }
-                    }
-                    .padding(9)
-
-                    Spacer(minLength: 16)
-                }
-                .background(PlainwordTheme.sidebar)
-                .navigationSplitViewColumnWidth(min: 170, ideal: 188, max: 205)
-            } detail: {
-                detailView
-                    .background(.clear)
-            }
-            .background(.clear)
-            .navigationSplitViewStyle(.balanced)
-            .tint(PlainwordTheme.accent)
+            detailView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(PlainwordTheme.surface)
         }
+        .background(PlainwordTheme.surface)
+        .tint(PlainwordTheme.accent)
         .frame(minWidth: 760, minHeight: 520)
     }
 
+    private var sidebar: some View {
+        VStack(spacing: 0) {
+            // Room for the window's own traffic lights, which sit over this column.
+            Color.clear
+                .frame(height: 30)
+
+            HStack(spacing: 10) {
+                PlainwordBrandMark(size: 32)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Plainword")
+                        .font(PlainwordFont.serif(15.5, weight: .medium))
+                        .foregroundStyle(PlainwordTheme.textPrimary)
+                    Text("Writing assistant")
+                        .font(PlainwordFont.ui(10))
+                        .foregroundStyle(PlainwordTheme.textTertiary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+
+            Rectangle()
+                .fill(PlainwordTheme.separator)
+                .frame(height: 1)
+                .padding(.horizontal, 12)
+
+            VStack(spacing: 3) {
+                ForEach(AppSection.allCases) { section in
+                    sidebarButton(section)
+                }
+            }
+            .padding(10)
+
+            Spacer(minLength: 16)
+
+            Text(versionLabel)
+                .font(PlainwordFont.mono(9.5))
+                .foregroundStyle(PlainwordTheme.textTertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+        }
+        .frame(width: 196)
+        .background(PlainwordTheme.raisedSurface)
+    }
+
     private func sidebarButton(_ section: AppSection) -> some View {
-        Button {
+        let isSelected = selection == section
+        return Button {
             selection = section
         } label: {
             HStack(spacing: 9) {
                 Image(systemName: section.systemImage)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13.5, weight: .medium))
                     .frame(width: 18)
+                    .foregroundStyle(
+                        isSelected ? PlainwordTheme.accent : PlainwordTheme.textTertiary
+                    )
                 Text(section.title)
-                    .font(.system(size: 13, weight: .medium))
-                Spacer()
+                    .font(PlainwordFont.ui(13, weight: .semibold))
+                    .foregroundStyle(
+                        isSelected ? PlainwordTheme.textPrimary : PlainwordTheme.textSecondary
+                    )
+                Spacer(minLength: 0)
             }
-            .foregroundStyle(
-                selection == section
-                    ? PlainwordTheme.textPrimary
-                    : PlainwordTheme.textSecondary
-            )
-            .padding(.horizontal, 9)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7.5)
             .contentShape(Rectangle())
             .background {
-                if selection == section {
-                    Color.clear
-                        .plainwordGlass(
-                            cornerRadius: 10,
-                            tint: PlainwordTheme.accent.opacity(0.13),
-                            interactive: true,
-                            shadow: true
-                        )
+                if isSelected {
+                    selectedBackground
                 }
             }
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(selection == section ? .isSelected : [])
+        .animation(PlainwordMotion.content, value: isSelected)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    /// In the light the selected item is a lifted sheet, and a soft shadow says so.
+    /// In the dark that same sheet is *darker* than the sidebar around it, and a
+    /// black shadow under a dark shape only smears its edge — so the edge is drawn.
+    @ViewBuilder
+    private var selectedBackground: some View {
+        let shape = RoundedRectangle(
+            cornerRadius: PlainwordTheme.controlCornerRadius,
+            style: .continuous
+        )
+        if colorScheme == .dark {
+            shape
+                .fill(PlainwordTheme.surface)
+                .overlay {
+                    shape.strokeBorder(PlainwordTheme.strongSeparator, lineWidth: 1)
+                }
+        } else {
+            shape
+                .fill(PlainwordTheme.surface)
+                .shadow(
+                    color: Color(
+                        nsColor: PlainwordTheme.adaptiveNSColor(
+                            light: 0x48381C,
+                            dark: 0x000000,
+                            lightAlpha: 0.1,
+                            darkAlpha: 0.2
+                        )
+                    ),
+                    radius: 2.5,
+                    x: 0,
+                    y: 1
+                )
+        }
+    }
+
+    private var versionLabel: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
+            as? String
+        return "v" + (version ?? "1.0.0")
     }
 
     @ViewBuilder

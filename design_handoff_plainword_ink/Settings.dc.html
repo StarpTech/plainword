@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=Nunito+Sans:opsz,wght@6..12,400..800&family=Fragment+Mono:ital@0;1&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#33684C;text-decoration:none}a:hover{color:#27543D}
+.pw{--c0:#EFE9DD;--s:#FBF8F1;--r:#F4EFE4;--fld:#F1EBDE;--ink:#26211A;--sec:#6F6759;--ter:#9C937F;--sep:#E3DCCB;--ssep:#D2C9B4;--acc:#33684C;--accS:#27543D;--accM:#E3EBE0;--accT:#F7F4EA;--dng:#A6453E;--dngM:#F5E3DE;--wrn:#96690F;--sh:0 18px 44px rgba(72,56,28,.16),0 3px 8px rgba(72,56,28,.08)}
+.pw[data-theme="dark"]{--c0:#191612;--s:#242019;--r:#2B261E;--fld:#1E1A14;--ink:#EFE8DA;--sec:#A79D8A;--ter:#7E7562;--sep:#383227;--ssep:#463E30;--acc:#8CBD9B;--accS:#A5CFB2;--accM:#2C3A2F;--accT:#161B15;--dng:#D08B80;--dngM:#3C2823;--wrn:#D9A84E;--sh:0 18px 44px rgba(0,0,0,.5),0 3px 8px rgba(0,0,0,.3)}
+@keyframes pwRise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+</style>
+</helmet>
+<div class="pw" data-theme="{{ theme }}" data-screen-label="Settings window" style="min-height:100vh;background:var(--c0);font-family:'Nunito Sans',sans-serif;color:var(--ink);display:flex;flex-direction:column;transition:background .25s">
+  <div style="display:flex;align-items:center;gap:12px;padding:18px 28px 0 28px">
+    <img src="assets/pw-icon.png" alt="" style="width:26px;height:26px;border-radius:7px">
+    <div style="font-family:Newsreader,serif;font-size:19px;font-weight:500">Plainword <span style="color:var(--ter);font-style:italic">· settings</span></div>
+    <div style="flex:1"></div>
+    <nav style="display:flex;gap:18px;font-size:12.5px;font-weight:600;align-items:center">
+      <a href="Popover Simulator.dc.html" style="color:var(--sec)">Simulator</a>
+      <span style="color:var(--acc);border-bottom:1.5px solid var(--acc);padding-bottom:2px">Settings app</span>
+      <a href="Design System.dc.html" style="color:var(--sec)">Design system</a>
+      <button onClick="{{ toggleTheme }}" style="cursor:pointer;font-family:'Fragment Mono',monospace;font-size:10.5px;color:var(--sec);background:var(--s);border:1px solid var(--ssep);border-radius:7px;padding:5px 10px" style-hover="background:var(--r)">{{ themeLabel }}</button>
+    </nav>
+  </div>
+  <div style="flex:1;display:flex;align-items:flex-start;justify-content:center;padding:26px 28px 40px 28px">
+    <div style="width:860px;height:600px;background:var(--s);border:1px solid var(--sep);border-radius:14px;box-shadow:var(--sh);display:flex;overflow:hidden">
+      <div style="width:196px;flex:none;background:var(--r);border-right:1px solid var(--sep);display:flex;flex-direction:column">
+        <div style="display:flex;align-items:center;gap:7px;padding:14px 14px 12px 14px">
+          <span style="width:11px;height:11px;border-radius:50%;background:var(--ssep)"></span>
+          <span style="width:11px;height:11px;border-radius:50%;background:var(--ssep)"></span>
+          <span style="width:11px;height:11px;border-radius:50%;background:var(--ssep)"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:6px 16px 16px 16px">
+          <img src="assets/pw-icon.png" alt="" style="width:32px;height:32px;border-radius:8px">
+          <div>
+            <div style="font-family:Newsreader,serif;font-size:15.5px;font-weight:500;line-height:1.15">Plainword</div>
+            <div style="font-size:10px;color:var(--ter)">Writing assistant</div>
+          </div>
+        </div>
+        <div style="height:1px;background:var(--sep);margin:0 12px"></div>
+        <div style="display:flex;flex-direction:column;gap:3px;padding:10px">
+          <sc-for list="{{ sections }}" as="sec" hint-placeholder-count="4">
+            <button onClick="{{ sec.select }}" style="cursor:pointer;display:flex;align-items:center;gap:9px;border:none;border-radius:8px;padding:7.5px 10px;text-align:left;background:{{ sec.bg }};box-shadow:{{ sec.shadow }}" style-hover="background:var(--fld)">
+              <span style="font-size:13px;width:18px;text-align:center;color:{{ sec.iconCol }}">{{ sec.glyph }}</span>
+              <span style="font-size:13px;font-weight:600;color:{{ sec.col }}">{{ sec.label }}</span>
+            </button>
+          </sc-for>
+        </div>
+        <div style="flex:1"></div>
+        <div style="padding:14px 16px;font-family:'Fragment Mono',monospace;font-size:9.5px;color:var(--ter)">v0.4 · preview</div>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:26px 30px 34px 30px">
+        <sc-if value="{{ isGeneral }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;flex-direction:column;gap:20px;animation:pwRise .18s ease-out" data-screen-label="General settings">
+            <div style="display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--sep);padding-bottom:14px">
+              <span style="font-family:Newsreader,serif;font-size:26px;font-weight:500">General</span>
+              <span style="font-size:12px;color:var(--sec)">Control when and where Plainword helps.</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <div style="font-family:'Fragment Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ter)">Suggestions</div>
+              <div style="background:var(--s);border:1px solid var(--sep);border-radius:11px;padding:2px 16px">
+                <div style="display:flex;align-items:center;gap:12px;min-height:52px;padding:7px 0">
+                  <div style="flex:1"><div style="font-size:13px;font-weight:700">Suggestions</div><div style="font-size:11px;color:var(--sec)">Enable explicit review and transform shortcuts.</div></div>
+                  <button onClick="{{ toggleListening }}" style="cursor:pointer;width:34px;height:20px;border-radius:10px;border:none;padding:2px;background:{{ listenBg }};display:flex;justify-content:{{ listenAlign }};transition:background .18s">
+                    <span style="width:16px;height:16px;border-radius:50%;background:var(--s);display:block;box-shadow:0 1px 2px rgba(0,0,0,.25)"></span>
+                  </button>
+                </div>
+                <div style="height:1px;background:var(--sep)"></div>
+                <div style="display:flex;align-items:center;gap:12px;min-height:52px;padding:7px 0">
+                  <div style="flex:1"><div style="font-size:13px;font-weight:700">Review text</div><div style="font-size:11px;color:var(--sec)">Requests a correction for the selection or current paragraph.</div></div>
+                  <span style="font-family:'Fragment Mono',monospace;font-size:11px;background:var(--fld);border:1px solid var(--ssep);border-radius:7px;padding:5px 10px">⌘F2</span>
+                </div>
+                <div style="height:1px;background:var(--sep)"></div>
+                <div style="display:flex;align-items:center;gap:12px;min-height:52px;padding:7px 0">
+                  <div style="flex:1"><div style="font-size:13px;font-weight:700">Transform text</div><div style="font-size:11px;color:var(--sec)">Opens transform mode for the selection or whole focused field.</div></div>
+                  <span style="font-family:'Fragment Mono',monospace;font-size:11px;background:var(--fld);border:1px solid var(--ssep);border-radius:7px;padding:5px 10px">⇧⌘F2</span>
+                </div>
+                <div style="height:1px;background:var(--sep)"></div>
+                <div style="display:flex;align-items:center;gap:12px;min-height:52px;padding:7px 0">
+                  <div style="flex:1"><div style="font-size:13px;font-weight:700">Status</div></div>
+                  <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:{{ statusCol }};background:{{ statusBg }};border-radius:7px;padding:5px 10px;transition:all .18s"><span style="width:6px;height:6px;border-radius:50%;background:{{ statusCol }}"></span>{{ statusLabel }}</span>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <div style="font-family:'Fragment Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ter)">Appearance</div>
+              <div style="background:var(--s);border:1px solid var(--sep);border-radius:11px;padding:2px 16px">
+                <div style="display:flex;align-items:center;gap:12px;min-height:52px;padding:7px 0">
+                  <div style="flex:1"><div style="font-size:13px;font-weight:700">Theme</div><div style="font-size:11px;color:var(--sec)">Choose how Plainword appears.</div></div>
+                  <span style="display:flex;background:var(--fld);border:1px solid var(--sep);border-radius:8px;padding:2px;gap:2px">
+                    <sc-for list="{{ appearances }}" as="ap" hint-placeholder-count="3">
+                      <button onClick="{{ ap.select }}" style="cursor:pointer;font-size:11px;font-weight:700;border:none;border-radius:6px;padding:4.5px 11px;background:{{ ap.bg }};color:{{ ap.col }};transition:background .15s">{{ ap.label }}</button>
+                    </sc-for>
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <div style="font-family:'Fragment Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ter)">Excluded apps</div>
+              <div style="background:var(--s);border:1px solid var(--sep);border-radius:11px;padding:2px 16px">
+                <div style="display:flex;align-items:center;gap:12px;min-height:48px;padding:7px 0">
+                  <div style="flex:1"><div style="font-size:13px;font-weight:700">1Password</div><div style="font-size:11px;color:var(--ter);font-family:'Fragment Mono',monospace;font-size:10px">com.1password.1password</div></div>
+                  <button style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--dng);background:none;border:none;border-radius:7px;padding:5px 9px" style-hover="background:var(--dngM)">Remove</button>
+                </div>
+                <div style="height:1px;background:var(--sep)"></div>
+                <div style="display:flex;align-items:center;gap:12px;min-height:48px;padding:7px 0">
+                  <div style="flex:1"><div style="font-size:13px;font-weight:700">Add an app</div><div style="font-size:11px;color:var(--sec)">Choose an installed app that Plainword should ignore.</div></div>
+                  <button style="cursor:pointer;font-size:12px;font-weight:700;color:var(--ink);background:none;border:1px solid var(--ssep);border-radius:8px;height:28px;padding:0 11px" style-hover="background:var(--r)">Add App…</button>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <div style="font-family:'Fragment Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ter)">Setup</div>
+              <div style="background:var(--s);border:1px solid var(--sep);border-radius:11px;padding:2px 16px">
+                <div style="display:flex;align-items:center;gap:12px;min-height:52px;padding:7px 0">
+                  <div style="flex:1"><div style="font-size:13px;font-weight:700">Provider</div><div style="font-size:11px;color:var(--sec)">The language model that powers your suggestions.</div></div>
+                  <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--acc);background:var(--accM);border-radius:7px;padding:5px 10px">✓ Configured</span>
+                </div>
+                <div style="height:1px;background:var(--sep)"></div>
+                <div style="display:flex;align-items:center;gap:12px;min-height:52px;padding:7px 0">
+                  <div style="flex:1"><div style="font-size:13px;font-weight:700">Accessibility</div><div style="font-size:11px;color:var(--sec)">Lets Plainword read the focused text and nearby context.</div></div>
+                  <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--acc);background:var(--accM);border-radius:7px;padding:5px 10px">✓ Allowed</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ isProvider }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:20px;animation:pwRise .18s ease-out" data-screen-label="Provider settings">
+            <div style="display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--sep);padding-bottom:14px">
+              <span style="font-family:Newsreader,serif;font-size:26px;font-weight:500">Provider</span>
+              <span style="font-size:12px;color:var(--sec)">The model your suggestions run on.</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+              <sc-for list="{{ providers }}" as="pr" hint-placeholder-count="3">
+                <button onClick="{{ pr.select }}" style="cursor:pointer;text-align:left;background:{{ pr.bg }};border:1px solid {{ pr.border }};border-radius:11px;padding:14px;display:flex;flex-direction:column;gap:5px;transition:border-color .15s" style-hover="border-color:var(--acc)">
+                  <span style="display:flex;align-items:center;justify-content:space-between"><span style="font-family:Newsreader,serif;font-size:16px;font-weight:500;color:var(--ink)">{{ pr.name }}</span><span style="width:14px;height:14px;border-radius:50%;border:1.5px solid {{ pr.dotBorder }};background:{{ pr.dot }};box-shadow:inset 0 0 0 2.5px var(--s)"></span></span>
+                  <span style="font-size:11px;line-height:1.45;color:var(--sec)">{{ pr.blurb }}</span>
+                </button>
+              </sc-for>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <div style="font-family:'Fragment Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ter)">Connection</div>
+              <div style="background:var(--s);border:1px solid var(--sep);border-radius:11px;padding:2px 16px">
+                <sc-if value="{{ provOllama }}" hint-placeholder-val="{{ true }}">
+                  <div style="display:flex;align-items:center;gap:12px;min-height:48px;padding:7px 0">
+                    <div style="font-size:13px;font-weight:600;color:var(--sec);width:100px;flex:none">Server</div>
+                    <span style="font-family:'Fragment Mono',monospace;font-size:11.5px;color:var(--sec)">localhost:11434</span>
+                    <span style="flex:1"></span>
+                    <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--acc);background:var(--accM);border-radius:7px;padding:5px 10px">⌂ Local</span>
+                  </div>
+                  <div style="height:1px;background:var(--sep);margin-left:112px"></div>
+                  <div style="display:flex;align-items:center;gap:12px;min-height:48px;padding:7px 0">
+                    <div style="font-size:13px;font-weight:600;color:var(--sec);width:100px;flex:none">Model</div>
+                    <select value="{{ ollamaModel }}" onChange="{{ setOllamaModel }}" style="flex:1;font-family:'Fragment Mono',monospace;font-size:11.5px;color:var(--ink);background:var(--fld);border:1px solid var(--ssep);border-radius:7px;padding:6px 8px;outline:none">
+                      <sc-for list="{{ ollamaModels }}" as="m" hint-placeholder-count="4"><option value="{{ m }}">{{ m }}</option></sc-for>
+                    </select>
+                    <button onClick="{{ refreshOllama }}" title="Reload models from Ollama" style="cursor:pointer;background:none;border:none;color:var(--sec);font-size:13px;width:26px;height:26px;border-radius:6px;padding:0" style-hover="background:var(--r)">{{ ollamaRefreshGlyph }}</button>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ provCodex }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;align-items:center;gap:12px;min-height:52px;padding:7px 0">
+                    <div style="font-size:13px;font-weight:600;color:var(--sec);width:100px;flex:none">Account</div>
+                    <div style="flex:1"><div style="font-size:13px">sam@example.com</div><div style="font-size:11px;color:var(--sec)">ChatGPT Plus · via Codex CLI</div></div>
+                    <button title="Check Codex CLI account and models" style="cursor:pointer;background:none;border:none;color:var(--sec);font-size:13px;width:26px;height:26px;border-radius:6px;padding:0" style-hover="background:var(--r)">⟳</button>
+                  </div>
+                  <div style="height:1px;background:var(--sep);margin-left:112px"></div>
+                  <div style="display:flex;align-items:center;gap:12px;min-height:52px;padding:7px 0">
+                    <div style="width:100px;flex:none"><div style="font-size:13px;font-weight:600;color:var(--sec)">Model</div></div>
+                    <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+                      <select value="{{ codexModel }}" onChange="{{ setCodexModel }}" style="font-family:'Fragment Mono',monospace;font-size:11.5px;color:var(--ink);background:var(--fld);border:1px solid var(--ssep);border-radius:7px;padding:6px 8px;outline:none">
+                        <option value="">Codex default</option>
+                        <option value="codex-spark">Codex-Spark (Fastest)</option>
+                        <option value="gpt-5-codex">GPT-5 Codex</option>
+                      </select>
+                      <div style="font-size:11px;color:var(--sec)">{{ codexModelDetail }}</div>
+                    </div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ provCompat }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;align-items:center;gap:12px;min-height:48px;padding:7px 0">
+                    <div style="font-size:13px;font-weight:600;color:var(--sec);width:100px;flex:none">Endpoint</div>
+                    <input value="{{ endpoint }}" onChange="{{ setEndpoint }}" placeholder="https://…/v1/chat/completions" style="flex:1;font-family:'Fragment Mono',monospace;font-size:11.5px;color:var(--ink);background:var(--fld);border:1px solid var(--ssep);border-radius:7px;padding:7px 9px;outline:none" style-focus="border-color:var(--acc);box-shadow:0 0 0 3px var(--accM)">
+                  </div>
+                  <div style="height:1px;background:var(--sep);margin-left:112px"></div>
+                  <div style="display:flex;align-items:center;gap:12px;min-height:48px;padding:7px 0">
+                    <div style="font-size:13px;font-weight:600;color:var(--sec);width:100px;flex:none">Model</div>
+                    <input value="{{ oaModel }}" onChange="{{ setOaModel }}" placeholder="Model identifier" style="flex:1;font-family:'Fragment Mono',monospace;font-size:11.5px;color:var(--ink);background:var(--fld);border:1px solid var(--ssep);border-radius:7px;padding:7px 9px;outline:none" style-focus="border-color:var(--acc);box-shadow:0 0 0 3px var(--accM)">
+                  </div>
+                  <div style="height:1px;background:var(--sep);margin-left:112px"></div>
+                  <div style="display:flex;align-items:center;gap:12px;min-height:48px;padding:7px 0">
+                    <div style="font-size:13px;font-weight:600;color:var(--sec);width:100px;flex:none">Authentication</div>
+                    <select value="{{ auth }}" onChange="{{ setAuth }}" style="width:200px;font-size:12px;color:var(--ink);background:var(--fld);border:1px solid var(--ssep);border-radius:7px;padding:6px 8px;outline:none">
+                      <option value="none">None</option>
+                      <option value="bearer">Bearer token</option>
+                      <option value="header">Custom header</option>
+                    </select>
+                  </div>
+                  <sc-if value="{{ authHeader }}" hint-placeholder-val="{{ false }}">
+                    <div style="height:1px;background:var(--sep);margin-left:112px"></div>
+                    <div style="display:flex;align-items:center;gap:12px;min-height:48px;padding:7px 0;animation:pwRise .18s ease-out">
+                      <div style="font-size:13px;font-weight:600;color:var(--sec);width:100px;flex:none">Header</div>
+                      <input value="{{ headerName }}" onChange="{{ setHeaderName }}" placeholder="api-key" style="flex:1;font-family:'Fragment Mono',monospace;font-size:11.5px;color:var(--ink);background:var(--fld);border:1px solid var(--ssep);border-radius:7px;padding:7px 9px;outline:none" style-focus="border-color:var(--acc);box-shadow:0 0 0 3px var(--accM)">
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ authAny }}" hint-placeholder-val="{{ false }}">
+                    <div style="height:1px;background:var(--sep);margin-left:112px"></div>
+                    <div style="display:flex;align-items:center;gap:12px;min-height:48px;padding:7px 0;animation:pwRise .18s ease-out">
+                      <div style="font-size:13px;font-weight:600;color:var(--sec);width:100px;flex:none">API key</div>
+                      <input type="password" value="{{ apiKey }}" onChange="{{ setApiKey }}" placeholder="Keychain" style="flex:1;font-family:'Fragment Mono',monospace;font-size:11.5px;color:var(--ink);background:var(--fld);border:1px solid var(--ssep);border-radius:7px;padding:7px 9px;outline:none" style-focus="border-color:var(--acc);box-shadow:0 0 0 3px var(--accM)">
+                    </div>
+                  </sc-if>
+                </sc-if>
+              </div>
+              <sc-if value="{{ provOllama }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:11px;color:var(--sec);padding:0 3px">{{ ollamaModelsNote }}</div>
+              </sc-if>
+            </div>
+            <sc-if value="{{ credentialCard }}" hint-placeholder-val="{{ false }}">
+              <div style="background:var(--s);border:1px solid var(--sep);border-radius:11px;padding:12px 14px;display:flex;align-items:center;gap:10px;animation:pwRise .18s ease-out">
+                <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:{{ credCol }};background:{{ credBg }};border-radius:7px;padding:5px 10px">{{ credLabel }}</span>
+                <span style="flex:1"></span>
+                <sc-if value="{{ credHasKey }}" hint-placeholder-val="{{ false }}">
+                  <button onClick="{{ clearKey }}" style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--dng);background:none;border:none;border-radius:7px;padding:5px 9px" style-hover="background:var(--dngM)">Clear</button>
+                </sc-if>
+                <button onClick="{{ saveKey }}" disabled="{{ cantSaveKey }}" style="cursor:pointer;font-size:12px;font-weight:700;color:var(--accT);background:var(--acc);border:none;border-radius:8px;height:28px;padding:0 12px;opacity:{{ saveKeyOpacity }}" style-hover="background:var(--accS)">Save</button>
+              </div>
+            </sc-if>
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <div style="font-family:'Fragment Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ter)">Options</div>
+              <div style="background:var(--s);border:1px solid var(--sep);border-radius:11px;padding:2px 16px">
+                <div style="display:flex;align-items:center;gap:12px;min-height:52px;padding:7px 0">
+                  <div style="flex:1"><div style="font-size:13px;font-weight:700">Thinking mode</div><div style="font-size:11px;color:var(--sec)">Set reasoning effort for models that support thinking.</div></div>
+                  <select value="{{ thinking }}" onChange="{{ setThinking }}" style="width:130px;font-size:12px;color:var(--ink);background:var(--fld);border:1px solid var(--ssep);border-radius:7px;padding:6px 8px;outline:none">
+                    <sc-for list="{{ thinkingModes }}" as="tm" hint-placeholder-count="4"><option value="{{ tm }}">{{ tm }}</option></sc-for>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div style="background:var(--s);border:1px solid var(--sep);border-radius:11px;padding:12px 14px;display:flex;align-items:center;gap:12px">
+              <span style="width:32px;height:32px;border-radius:9px;background:{{ connBg }};color:{{ connCol }};display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex:none;transition:background .2s">{{ connIcon }}</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:700">{{ connTitle }}</div>
+                <div style="font-size:11px;color:{{ connDetailCol }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ connDetail }}</div>
+              </div>
+              <button onClick="{{ testConnection }}" disabled="{{ cantTest }}" style="cursor:pointer;font-size:12px;font-weight:700;color:var(--accT);background:var(--acc);border:none;border-radius:8px;height:28px;padding:0 12px;opacity:{{ testOpacity }};flex:none" style-hover="background:var(--accS)">{{ testTitle }}</button>
+            </div>
+            <div style="font-size:11px;line-height:1.55;color:var(--ter)">Credentials live in the macOS Keychain. With Ollama, your text never leaves this Mac.</div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ isWriting }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:20px;animation:pwRise .18s ease-out" data-screen-label="Writing settings">
+            <div style="display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--sep);padding-bottom:14px">
+              <span style="font-family:Newsreader,serif;font-size:26px;font-weight:500">Writing</span>
+              <span style="font-size:12px;color:var(--sec)">Shape the voice of suggestions without changing your meaning.</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <div style="font-family:'Fragment Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ter)">Voice</div>
+              <div style="background:var(--s);border:1px solid var(--sep);border-radius:11px;padding:2px 16px">
+                <div style="display:flex;align-items:center;gap:12px;min-height:52px;padding:7px 0">
+                  <div style="flex:1"><div style="font-size:13px;font-weight:700">Tone</div><div style="font-size:11px;color:var(--sec)">The emotional character of suggestions.</div></div>
+                  <span style="display:flex;background:var(--fld);border:1px solid var(--sep);border-radius:8px;padding:2px;gap:2px">
+                    <sc-for list="{{ tones }}" as="t" hint-placeholder-count="3">
+                      <button onClick="{{ t.select }}" style="cursor:pointer;font-size:11px;font-weight:700;border:none;border-radius:6px;padding:4.5px 11px;background:{{ t.bg }};color:{{ t.col }};transition:background .15s">{{ t.label }}</button>
+                    </sc-for>
+                  </span>
+                </div>
+                <div style="height:1px;background:var(--sep)"></div>
+                <div style="display:flex;align-items:center;gap:12px;min-height:52px;padding:7px 0">
+                  <div style="flex:1"><div style="font-size:13px;font-weight:700">Style</div><div style="font-size:11px;color:var(--sec)">How suggestions are phrased and structured.</div></div>
+                  <span style="display:flex;background:var(--fld);border:1px solid var(--sep);border-radius:8px;padding:2px;gap:2px">
+                    <sc-for list="{{ styles }}" as="st" hint-placeholder-count="3">
+                      <button onClick="{{ st.select }}" style="cursor:pointer;font-size:11px;font-weight:700;border:none;border-radius:6px;padding:4.5px 11px;background:{{ st.bg }};color:{{ st.col }};transition:background .15s">{{ st.label }}</button>
+                    </sc-for>
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <div style="font-family:'Fragment Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ter)">Prompt</div>
+              <div style="background:var(--s);border:1px solid var(--sep);border-radius:11px;padding:14px 16px;display:flex;flex-direction:column;gap:9px">
+                <div><div style="font-size:13px;font-weight:700">Additional instructions</div><div style="font-size:11px;color:var(--sec)">Appended to every writing request.</div></div>
+                <textarea placeholder="For example: Prefer British English and avoid semicolons." rows="3" style="font-family:Newsreader,serif;font-size:13.5px;color:var(--ink);background:var(--fld);border:1px solid var(--ssep);border-radius:9px;padding:10px;outline:none;resize:vertical;line-height:1.5"></textarea>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ isDebug }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:20px;animation:pwRise .18s ease-out" data-screen-label="Debug settings">
+            <div style="display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--sep);padding-bottom:14px">
+              <span style="font-family:Newsreader,serif;font-size:26px;font-weight:500">Debug</span>
+              <span style="font-size:12px;color:var(--sec)">Inspect the exact prompts and responses used for suggestions.</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-family:'Fragment Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ter)">LLM calls</span>
+              <span style="display:flex;background:var(--fld);border:1px solid var(--sep);border-radius:8px;padding:2px;gap:2px">
+                <sc-for list="{{ scopes }}" as="sc" hint-placeholder-count="2">
+                  <button onClick="{{ sc.select }}" style="cursor:pointer;font-size:11px;font-weight:700;border:none;border-radius:6px;padding:4.5px 11px;background:{{ sc.bg }};color:{{ sc.col }};transition:background .15s">{{ sc.label }}</button>
+                </sc-for>
+              </span>
+              <span style="flex:1"></span>
+              <span style="font-size:11px;color:var(--sec)">{{ callCount }}</span>
+              <button style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--sec);background:none;border:none;border-radius:7px;padding:5px 9px" style-hover="background:var(--r);color:var(--ink)">Clear</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--sec);margin-top:-8px">
+              <span style="font-family:'Fragment Mono',monospace;font-size:10px;color:var(--ter)">⌗</span>
+              Kept in memory for this session. API keys and auth headers are never recorded.
+            </div>
+            <div style="display:flex;flex-direction:column;gap:9px">
+              <sc-for list="{{ logs }}" as="lg" hint-placeholder-count="4">
+                <button onClick="{{ lg.open }}" style="cursor:pointer;text-align:left;background:var(--s);border:1px solid var(--sep);border-radius:11px;padding:13px 14px;display:flex;align-items:center;gap:11px;transition:border-color .12s" style-hover="border-color:var(--acc);background:var(--r)">
+                  <span style="flex:1;display:flex;flex-direction:column;gap:5px;min-width:0">
+                    <span style="display:flex;align-items:center;gap:8px">
+                      <span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:{{ lg.col }};background:{{ lg.badgeBg }};border-radius:99px;padding:3px 8px">{{ lg.symbol }} {{ lg.status }}</span>
+                      <span style="font-size:13px;font-weight:700;color:var(--ink)">{{ lg.model }}</span>
+                      <span style="flex:1"></span>
+                      <span style="font-family:'Fragment Mono',monospace;font-size:10px;color:var(--sec)">{{ lg.time }}</span>
+                    </span>
+                    <span style="font-size:12px;color:var(--sec);font-family:Newsreader,serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">“{{ lg.subject }}”</span>
+                    <sc-if value="{{ lg.failure }}" hint-placeholder-val="{{ false }}">
+                      <span style="font-size:11px;color:var(--dng)">{{ lg.failure }}</span>
+                    </sc-if>
+                    <span style="font-size:11px;color:var(--ter);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ lg.summary }}</span>
+                  </span>
+                  <span style="color:var(--ter);font-size:11px;flex:none">›</span>
+                </button>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+  </div>
+  <sc-if value="{{ inspected }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeInspect }}" style="position:fixed;inset:0;background:rgba(30,24,14,.4);display:flex;align-items:center;justify-content:center;z-index:50;animation:pwRise .15s ease-out" data-screen-label="Call inspector">
+      <div onClick="{{ swallow }}" style="width:640px;max-height:82vh;background:var(--s);border:1px solid var(--ssep);border-radius:14px;box-shadow:var(--sh);display:flex;flex-direction:column;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--sep)">
+          <span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:{{ inspected.col }};background:{{ inspected.badgeBg }};border-radius:99px;padding:3px 8px">{{ inspected.symbol }} {{ inspected.status }}</span>
+          <span style="font-family:Newsreader,serif;font-size:17px;font-weight:500">{{ inspected.model }}</span>
+          <span style="flex:1"></span>
+          <span style="font-family:'Fragment Mono',monospace;font-size:10px;color:var(--sec)">{{ inspected.time }}</span>
+          <button onClick="{{ closeInspect }}" style="cursor:pointer;background:none;border:none;color:var(--sec);font-size:13px;width:24px;height:24px;border-radius:6px;padding:0" style-hover="background:var(--r)">✕</button>
+        </div>
+        <div style="padding:10px 18px;border-bottom:1px solid var(--sep);font-size:11px;color:var(--sec)">{{ inspected.transport }}</div>
+        <div style="flex:1;overflow-y:auto;padding:14px 18px;display:flex;flex-direction:column;gap:12px">
+          <sc-for list="{{ inspectedPanes }}" as="pane" hint-placeholder-count="2">
+            <div style="background:var(--r);border:1px solid var(--sep);border-radius:10px;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;border-bottom:1px solid var(--sep)">
+                <span style="font-size:12px;font-weight:700">{{ pane.title }}</span>
+                <span style="font-size:10.5px;color:var(--sec)">{{ pane.size }}</span>
+                <span style="flex:1"></span>
+                <button onClick="{{ pane.copy }}" style="cursor:pointer;font-size:11px;font-weight:700;color:var(--sec);background:none;border:none;border-radius:6px;padding:4px 8px" style-hover="background:var(--fld);color:var(--ink)">{{ pane.copyLabel }}</button>
+              </div>
+              <pre style="margin:0;padding:11px;font-family:'Fragment Mono',monospace;font-size:10.5px;line-height:1.55;color:var(--ink);white-space:pre-wrap;word-break:break-word;max-height:220px;overflow-y:auto">{{ pane.text }}</pre>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display:flex;justify-content:flex-end;padding:12px 18px;border-top:1px solid var(--sep)">
+          <button onClick="{{ closeInspect }}" style="cursor:pointer;font-size:12px;font-weight:700;color:var(--ink);background:none;border:1px solid var(--ssep);border-radius:8px;height:28px;padding:0 12px" style-hover="background:var(--r)">Done <span style="font-family:'Fragment Mono',monospace;font-size:10px;opacity:.55">esc</span></button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1240,&quot;height&quot;:760},&quot;appearance&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;light&quot;,&quot;dark&quot;],&quot;default&quot;:&quot;light&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Theme&quot;}}">
+class Component extends DCLogic {
+  state = { section:"general", themeOverride:null, listening:true, appearance:"Automatic", tone:"Neutral", style:"Concise", provider:"Ollama", scope:"All", inspectedId:null, copied:null,
+    ollamaModel:"qwen3:8b", ollamaLoading:false, codexModel:"codex-spark",
+    endpoint:"", oaModel:"", auth:"bearer", headerName:"api-key", apiKey:"", credSaved:false,
+    thinking:"Medium", conn:"idle" };
+  componentDidMount() {
+    this.keyH = (e) => { if (e.key === "Escape" && this.state.inspectedId != null) this.setState({ inspectedId:null }); };
+    window.addEventListener("keydown", this.keyH);
+  }
+  componentWillUnmount() { window.removeEventListener("keydown", this.keyH); }
+  calls() {
+    return [
+      { id:1, ok:true, http:"HTTP 200", model:"qwen3:8b", time:"14:32:08",
+        subject:"I beleive the the report is finished, and I will send it tomorow morning.",
+        summary:"Correct · Mail · TTFB 0.34 s · 1.42 s · 918 in · 64 out",
+        transport:"Streaming · Medium thinking · TTFB 0.34 s · 1.42 s · 918 in · 64 out",
+        request:'{\n  "model": "qwen3:8b",\n  "stream": true,\n  "messages": [\n    { "role": "system", "content": "You are a careful copy editor…" },\n    { "role": "user", "content": "<source_application>Mail</source_application>\\n<text_to_edit>I beleive the the report is finished, and I will send it tomorow morning.</text_to_edit>" }\n  ]\n}',
+        response:'{\n  "message": {\n    "role": "assistant",\n    "content": "I believe the report is finished, and I will send it tomorrow morning."\n  },\n  "done_reason": "stop",\n  "eval_count": 64\n}' },
+      { id:2, ok:true, http:"HTTP 200", model:"qwen3:8b", time:"14:29:51",
+        subject:"make it friendlier",
+        summary:"Transform · Mail · TTFB 0.41 s · 2.08 s · 1,102 in · 88 out",
+        transport:"Streaming · Medium thinking · TTFB 0.41 s · 2.08 s · 1,102 in · 88 out",
+        request:'{\n  "model": "qwen3:8b",\n  "stream": true,\n  "messages": [\n    { "role": "system", "content": "You rewrite text as instructed…" },\n    { "role": "user", "content": "<source_application>Mail</source_application>\\n<edit_instruction>make it friendlier</edit_instruction>\\n<text_to_edit>I beleive the the report…</text_to_edit>" }\n  ]\n}',
+        response:'{\n  "message": {\n    "role": "assistant",\n    "content": "Good news: the report\'s all wrapped up! I\'ll send it over tomorrow morning."\n  },\n  "done_reason": "stop",\n  "eval_count": 88\n}' },
+      { id:3, ok:true, http:"HTTP 200", model:"qwen3:8b", time:"14:12:03",
+        subject:"Quick heads-up: standup moves to 9:30 tomorrow so the platform team can join.",
+        summary:"Correct · Slack · TTFB 0.29 s · 1.81 s · 1,344 in · 71 out",
+        transport:"Streaming · Medium thinking · TTFB 0.29 s · 1.81 s · 1,344 in · 71 out",
+        request:'{\n  "model": "qwen3:8b",\n  "stream": true,\n  "messages": [\n    { "role": "user", "content": "<source_application>Slack</source_application>\\n<text_to_edit>Quick heads-up: standup moves to 9:30…</text_to_edit>" }\n  ]\n}',
+        response:'{\n  "message": {\n    "role": "assistant",\n    "content": "NO_CHANGES"\n  },\n  "done_reason": "stop",\n  "eval_count": 71\n}' },
+      { id:4, ok:false, http:"Failed", model:"qwen3:8b", time:"13:58:40",
+        subject:"Remember to book the flights before Friday.",
+        summary:"Correct · Notes · Streaming",
+        failure:"Could not connect to localhost:11434 — connection refused.",
+        transport:"Streaming · Medium thinking",
+        request:'{\n  "model": "qwen3:8b",\n  "stream": true,\n  "messages": [\n    { "role": "user", "content": "<source_application>Notes</source_application>\\n<text_to_edit>Remember to book the flights before Friday.</text_to_edit>" }\n  ]\n}',
+        response:"" }
+    ];
+  }
+  providerVals() {
+    const s = this.state;
+    const isOllama = s.provider === "Ollama", isCodex = s.provider === "Codex", isCompat = s.provider === "OpenAI-compatible";
+    const authAny = isCompat && s.auth !== "none";
+    const canTest = isCodex || (isOllama ? !!s.ollamaModel :
+      (s.endpoint.trim().startsWith("http") && !!s.oaModel.trim() && (!authAny || !!s.apiKey)));
+    const target = isCodex ? (s.codexModel ? `Codex · ${s.codexModel}` : "Codex · Default model")
+      : isOllama ? `Ollama · ${s.ollamaModel}` : (s.oaModel.trim() ? `OpenAI-compatible · ${s.oaModel.trim()}` : "OpenAI-compatible");
+    const connMap = {
+      idle: { icon:"⚡", col:"var(--acc)", bg:"var(--accM)", title:"Verify your setup",
+        detail: canTest ? `Send a short request to ${target}.` : "Complete the provider details above to enable a connection test." },
+      testing: { icon:"⟳", col:"var(--acc)", bg:"var(--accM)", title:"Testing connection", detail:`Waiting for a response from ${target}.` },
+      success: { icon:"✓", col:"var(--acc)", bg:"var(--accM)", title:"Connection verified", detail:"The provider returned a valid response." },
+      failure: { icon:"△", col:"var(--dng)", bg:"var(--dngM)", title:"Connection failed", detail:"Could not connect — check the details above and try again.", dc:"var(--dng)" }
+    };
+    const c = connMap[s.conn];
+    const cred = !s.apiKey ? { label:"No key saved", col:"var(--ter)", bg:"var(--fld)" }
+      : s.credSaved ? { label:"✓ Saved in Keychain", col:"var(--acc)", bg:"var(--accM)" }
+      : { label:"Unsaved changes", col:"var(--wrn)", bg:"var(--fld)" };
+    const set = (k) => (e) => this.setState({ [k]: e.target.value, conn:"idle", ...(k === "apiKey" ? { credSaved:false } : {}) });
+    return {
+      provOllama:isOllama, provCodex:isCodex, provCompat:isCompat,
+      ollamaModel:s.ollamaModel, setOllamaModel:set("ollamaModel"),
+      ollamaModels:["qwen3:8b", "llama3.2:3b", "gemma3:12b", "mistral:7b"],
+      ollamaRefreshGlyph: s.ollamaLoading ? "…" : "⟳",
+      refreshOllama: () => { this.setState({ ollamaLoading:true }); setTimeout(() => this.setState({ ollamaLoading:false }), 900); },
+      ollamaModelsNote:"Loaded 4 local models.",
+      codexModel:s.codexModel, setCodexModel:set("codexModel"),
+      codexModelDetail: s.codexModel === "codex-spark" ? "Optimized for low-latency corrections." : "Codex-Spark is recommended for responsive corrections.",
+      endpoint:s.endpoint, setEndpoint:set("endpoint"),
+      oaModel:s.oaModel, setOaModel:set("oaModel"),
+      auth:s.auth, setAuth:set("auth"),
+      authHeader: isCompat && s.auth === "header", authAny,
+      headerName:s.headerName, setHeaderName:set("headerName"),
+      apiKey:s.apiKey, setApiKey:set("apiKey"),
+      credentialCard:authAny, credLabel:cred.label, credCol:cred.col, credBg:cred.bg,
+      credHasKey:!!s.apiKey, cantSaveKey:!s.apiKey || s.credSaved, saveKeyOpacity:(!s.apiKey || s.credSaved) ? .45 : 1,
+      saveKey: () => this.setState({ credSaved:true }),
+      clearKey: () => this.setState({ apiKey:"", credSaved:false }),
+      thinking:s.thinking, setThinking:set("thinking"),
+      thinkingModes: isCodex ? ["Low", "Medium", "High"] : ["Off", "Low", "Medium", "High"],
+      connIcon:c.icon, connCol:c.col, connBg:c.bg, connTitle:c.title, connDetail:c.detail,
+      connDetailCol:c.dc || "var(--sec)",
+      cantTest:!canTest || s.conn === "testing", testOpacity:(!canTest || s.conn === "testing") ? .45 : 1,
+      testTitle: s.conn === "testing" ? "Testing…" : (s.conn === "idle" ? "Test Connection" : "Test Again"),
+      testConnection: () => { this.setState({ conn:"testing" });
+        setTimeout(() => this.setState({ conn: isCompat && !authAny && !/openai|api\./.test(s.endpoint) ? "success" : "success" }), 1300); }
+    };
+  }
+  debugVals() {
+    const s = this.state;
+    const all = this.calls();
+    const failures = all.filter((c) => !c.ok);
+    const visible = s.scope === "Failures" ? failures : all;
+    const deco = (c) => ({
+      ...c,
+      status: c.http, symbol: c.ok ? "✓" : "△",
+      col: c.ok ? "var(--acc)" : "var(--dng)",
+      badgeBg: c.ok ? "var(--accM)" : "var(--dngM)",
+      open: () => this.setState({ inspectedId: c.id })
+    });
+    const cur = all.find((c) => c.id === s.inspectedId);
+    return {
+      scopes: [`All (${all.length})`, `Failures (${failures.length})`].map((label) => {
+        const key = label.startsWith("All") ? "All" : "Failures";
+        return { label, select: () => this.setState({ scope: key }),
+          bg: s.scope === key ? "var(--s)" : "transparent",
+          col: s.scope === key ? "var(--ink)" : "var(--ter)" };
+      }),
+      callCount: `${all.length} calls`,
+      logs: visible.map(deco),
+      inspected: cur ? deco(cur) : null,
+      closeInspect: () => this.setState({ inspectedId:null }),
+      swallow: (e) => e.stopPropagation(),
+      inspectedPanes: cur ? [["Request", cur.request], ["Response", cur.response]].map(([title, text]) => ({
+        title, text: text || "Nothing was recorded for this section.",
+        size: `${text.length.toLocaleString()} characters`,
+        copyLabel: s.copied === cur.id + title ? "✓ Copied" : "Copy",
+        copy: () => this.copyPane(cur.id, title, text)
+      })) : []
+    };
+  }
+  copyPane(id, which, text) {
+    try { navigator.clipboard.writeText(text); } catch (e) {}
+    this.setState({ copied: id + which });
+    setTimeout(() => this.setState({ copied:null }), 1600);
+  }
+  renderVals() {
+    const s = this.state;
+    const theme = s.themeOverride ?? this.props.appearance ?? "light";
+    const seg = (items, cur, key) => items.map((label) => ({
+      label, select: () => this.setState({ [key]: label }),
+      bg: cur === label ? "var(--s)" : "transparent",
+      col: cur === label ? "var(--ink)" : "var(--ter)"
+    }));
+    const provBlurbs = {
+      "Ollama": "A local model. Your text is processed entirely on this Mac.",
+      "Codex": "Reuses your signed-in Codex CLI account. No extra credential.",
+      "OpenAI-compatible": "Any endpoint that speaks chat completions, with your key."
+    };
+    const provModels = { "Ollama": ["qwen3:8b", "Served from localhost:11434."], "Codex": ["gpt-5-codex", "Chosen by your Codex subscription."], "OpenAI-compatible": ["gpt-4.1-mini", "Set per endpoint."] };
+    return {
+      theme, themeLabel: theme === "dark" ? "◐ light" : "◑ dark",
+      toggleTheme: () => this.setState({ themeOverride: theme === "dark" ? "light" : "dark" }),
+      isGeneral: s.section === "general", isProvider: s.section === "provider",
+      isWriting: s.section === "writing", isDebug: s.section === "debug",
+      sections: [
+        { id:"general", label:"General", glyph:"⚙" }, { id:"provider", label:"Provider", glyph:"⌁" },
+        { id:"writing", label:"Writing", glyph:"✎" }, { id:"debug", label:"Debug", glyph:"⌗" }
+      ].map((x) => ({
+        ...x, select: () => this.setState({ section: x.id }),
+        bg: s.section === x.id ? "var(--s)" : "transparent",
+        shadow: s.section === x.id ? "0 1px 3px rgba(72,56,28,.12)" : "none",
+        col: s.section === x.id ? "var(--ink)" : "var(--sec)",
+        iconCol: s.section === x.id ? "var(--acc)" : "var(--ter)"
+      })),
+      toggleListening: () => this.setState({ listening: !s.listening }),
+      listenBg: s.listening ? "var(--acc)" : "var(--ssep)",
+      listenAlign: s.listening ? "flex-end" : "flex-start",
+      statusLabel: s.listening ? "Listening" : "Paused",
+      statusCol: s.listening ? "var(--acc)" : "var(--ter)",
+      statusBg: s.listening ? "var(--accM)" : "var(--fld)",
+      appearances: seg(["Automatic", "Light", "Dark"], s.appearance, "appearance"),
+      tones: seg(["Neutral", "Warm", "Direct"], s.tone, "tone"),
+      styles: seg(["Concise", "Detailed", "Playful"], s.style, "style"),
+      providers: ["Ollama", "Codex", "OpenAI-compatible"].map((name) => ({
+        name, blurb: provBlurbs[name], select: () => this.setState({ provider: name, conn:"idle" }),
+        bg: s.provider === name ? "var(--accM)" : "var(--s)",
+        border: s.provider === name ? "var(--acc)" : "var(--sep)",
+        dot: s.provider === name ? "var(--acc)" : "transparent",
+        dotBorder: s.provider === name ? "var(--acc)" : "var(--ssep)"
+      })),
+      ...this.providerVals(),
+      ...this.debugVals()
+    };
+  }
+}
+</script>
+</body>
+</html>

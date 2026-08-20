@@ -264,8 +264,10 @@ final class AccessibilityTextClient {
             logger.debug("Writing: the focused field did not report a readable state")
             return nil
         }
-        guard textState.documentUTF16Length == 0,
-              textState.range.location == 0,
+        // The document scope reads from the start of the field, so the caret offset and
+        // the captured text share one coordinate space. `insertionPoint` then decides
+        // whether the caret's own paragraph is blank; the field itself need not be.
+        guard textState.range.location == 0,
               textState.selectedRange.length == 0,
               let context = TextEditContextExtractor.insertionPoint(
                 in: textState.text,
@@ -273,7 +275,7 @@ final class AccessibilityTextClient {
               ) else {
             logger.debug(
                 """
-                Writing: the focused field is not empty \
+                Writing: the caret is not on a blank line \
                 (\(textState.documentUTF16Length, privacy: .public) characters, \
                 selection at \(textState.selectedRange.location, privacy: .public) \
                 length \(textState.selectedRange.length, privacy: .public))

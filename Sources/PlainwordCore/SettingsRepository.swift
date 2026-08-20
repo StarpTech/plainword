@@ -57,7 +57,7 @@ public struct SettingsRepository: Sendable {
                 authentication: authentication,
                 customHeaderName: defaults.string(forKey: Key.customHeaderName) ?? "api-key",
                 thinkingMode: defaults.string(forKey: Key.thinkingMode)
-                    .flatMap(ThinkingMode.init(rawValue:)) ?? .low
+                    .flatMap(ThinkingMode.init(rawValue:)) ?? .off
             )
         }
         nonmutating set {

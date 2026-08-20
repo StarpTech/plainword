@@ -7,11 +7,11 @@ const SIZES = {
 
 const VARIANTS = {
   primary:
-    'bg-brand text-white shadow-brand hover:bg-brand-strong hover:shadow-brand-lift ' +
-    'active:shadow-brand',
+    'bg-accent text-accent-ink shadow-accent hover:bg-accent-strong hover:shadow-accent-lift ' +
+    'active:shadow-accent',
   secondary:
-    'border border-line-strong bg-surface text-ink shadow-card hover:border-brand/30 ' +
-    'hover:text-brand-strong hover:shadow-card-lift active:shadow-card',
+    'border border-line-strong bg-surface text-ink shadow-paper hover:border-accent/40 ' +
+    'hover:text-accent-strong hover:shadow-paper-lift active:shadow-paper',
 };
 
 export default function Button({ size = 'md', variant = 'primary', className = '', children, ...rest }) {

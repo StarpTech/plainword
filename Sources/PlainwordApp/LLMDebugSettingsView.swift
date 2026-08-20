@@ -25,23 +25,20 @@ struct LLMDebugSettingsView: View {
         SettingsPage {
             SettingsPageHeader(
                 title: "Debug",
-                subtitle: "Inspect the exact prompts and responses used for suggestions.",
-                icon: "ladybug"
+                subtitle: "Inspect the exact prompts and responses used for suggestions."
             )
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 listHeader
                 privacyNotice
 
                 if logStore.entries.isEmpty {
                     emptyState(
-                        icon: "text.magnifyingglass",
                         title: "No LLM calls yet",
                         message: "Review or transform some text, or test your provider connection."
                     )
                 } else if visibleEntries.isEmpty {
                     emptyState(
-                        icon: "checkmark.circle",
                         title: "No failed calls",
                         message: "Every recorded call came back successfully."
                     )
@@ -58,7 +55,6 @@ struct LLMDebugSettingsView: View {
                 }
             }
         }
-        .navigationTitle("Debug")
         .sheet(isPresented: isInspecting) {
             if let entry = inspectedCall {
                 LLMCallDetailView(entry: entry) {
@@ -71,33 +67,30 @@ struct LLMDebugSettingsView: View {
     }
 
     private var listHeader: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 10) {
-                SettingsSectionLabel("LLM calls")
-                Spacer()
-                Text(callCountLabel)
-                    .font(.caption)
-                    .foregroundStyle(PlainwordTheme.textSecondary)
-                Button("Clear") {
-                    logStore.clear()
-                    inspectedCallID = nil
-                }
-                .buttonStyle(PlainwordButtonStyle(.quiet))
-                .disabled(logStore.entries.isEmpty)
-                .help("Remove every recorded call from this session")
-            }
+        HStack(spacing: 10) {
+            SettingsSectionLabel("LLM calls")
 
             if !logStore.entries.isEmpty {
-                Picker("Show", selection: $scope) {
-                    ForEach(Scope.allCases) { scope in
-                        Text(scopeTitle(scope)).tag(scope)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 240, alignment: .leading)
-                .accessibilityLabel("Filter calls")
+                PlainwordSegmentedControl(
+                    segments: Scope.allCases.map { PlainwordSegment($0, scopeTitle($0)) },
+                    selection: $scope,
+                    accessibilityLabel: "Filter calls"
+                )
             }
+
+            Spacer(minLength: 8)
+
+            Text(callCountLabel)
+                .font(PlainwordFont.ui(11))
+                .foregroundStyle(PlainwordTheme.textSecondary)
+
+            Button("Clear") {
+                logStore.clear()
+                inspectedCallID = nil
+            }
+            .buttonStyle(PlainwordButtonStyle(.quiet))
+            .disabled(logStore.entries.isEmpty)
+            .help("Remove every recorded call from this session")
         }
     }
 
@@ -105,12 +98,13 @@ struct LLMDebugSettingsView: View {
     /// need to outweigh the calls it sits above. The rest lives in the tooltip.
     private var privacyNotice: some View {
         HStack(spacing: 6) {
-            Image(systemName: "memorychip")
-                .font(.system(size: 10, weight: .medium))
+            Text(verbatim: "⌗")
+                .font(PlainwordFont.mono(10))
+                .foregroundStyle(PlainwordTheme.textTertiary)
                 .accessibilityHidden(true)
             Text("Kept in memory for this session. API keys and auth headers are never recorded.")
+                .font(PlainwordFont.ui(11))
         }
-        .font(.caption)
         .foregroundStyle(PlainwordTheme.textSecondary)
         .help(
             "The newest 100 calls are kept until Plainword quits or you clear them. "
@@ -121,36 +115,33 @@ struct LLMDebugSettingsView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func emptyState(icon: String, title: String, message: String) -> some View {
+    private func emptyState(title: String, message: String) -> some View {
         VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 22))
-                .foregroundStyle(PlainwordTheme.textSecondary)
-                .accessibilityHidden(true)
             Text(title)
-                .font(.system(size: 14, weight: .medium))
+                .font(PlainwordFont.serif(15, weight: .medium))
             Text(message)
-                .font(.caption)
+                .font(PlainwordFont.ui(11))
                 .foregroundStyle(PlainwordTheme.textSecondary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 34)
-        .plainwordGlass(cornerRadius: PlainwordTheme.cardCornerRadius, shadow: true)
+        .plainwordCard(cornerRadius: PlainwordTheme.cardCornerRadius)
         .accessibilityElement(children: .combine)
     }
 
     private var clearedCallNotice: some View {
         VStack(spacing: 12) {
             Text("This call is no longer recorded.")
-                .font(.system(size: 13, weight: .medium))
+                .font(PlainwordFont.serif(15, weight: .medium))
             Button("Done") { inspectedCallID = nil }
                 .buttonStyle(PlainwordButtonStyle(.secondary))
                 .keyboardShortcut(.cancelAction)
         }
         .padding(30)
         .frame(minWidth: 320)
-        .background(PlainwordTheme.canvas)
+        .background(PlainwordTheme.surface)
+        .foregroundStyle(PlainwordTheme.textPrimary)
     }
 
     private var visibleEntries: [LLMDebugLogEntry] {
@@ -200,21 +191,23 @@ private struct LLMCallRow: View {
     var body: some View {
         Button(action: open) {
             HStack(alignment: .center, spacing: 11) {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 8) {
                         LLMCallStatusBadge(entry: entry)
                         Text(entry.request.model)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(PlainwordFont.ui(13, weight: .bold))
                             .lineLimit(1)
                         Spacer(minLength: 8)
                         Text(entry.request.startedAt, format: .dateTime.hour().minute().second())
-                            .font(.caption.monospacedDigit())
+                            .font(PlainwordFont.mono(10))
                             .foregroundStyle(PlainwordTheme.textSecondary)
                     }
 
                     if let subject = entry.subjectPreview {
+                        // The author's own words, so they are set the way the author
+                        // sees them everywhere else.
                         Text("\u{201C}" + subject + "\u{201D}")
-                            .font(.system(size: 12))
+                            .font(PlainwordFont.serif(12.5))
                             .foregroundStyle(PlainwordTheme.textSecondary)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
@@ -223,7 +216,7 @@ private struct LLMCallRow: View {
 
                     if let failureMessage = entry.failureMessage {
                         Text(failureMessage)
-                            .font(.caption)
+                            .font(PlainwordFont.ui(11))
                             .foregroundStyle(PlainwordTheme.danger)
                             .lineLimit(1)
                     }
@@ -238,35 +231,31 @@ private struct LLMCallRow: View {
                         Text(entry.listSummary)
                             .lineLimit(1)
                     }
-                    .font(.caption)
+                    .font(PlainwordFont.ui(11))
                     .foregroundStyle(PlainwordTheme.textTertiary)
                 }
 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
+                Text(verbatim: "›")
+                    .font(PlainwordFont.ui(13))
                     .foregroundStyle(
                         isHovering ? PlainwordTheme.accent : PlainwordTheme.textTertiary
                     )
                     .accessibilityHidden(true)
             }
-            .padding(13)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
             .contentShape(
                 RoundedRectangle(cornerRadius: PlainwordTheme.cardCornerRadius, style: .continuous)
             )
         }
         .buttonStyle(.plain)
-        .background {
-            if isHovering {
-                RoundedRectangle(
-                    cornerRadius: PlainwordTheme.cardCornerRadius,
-                    style: .continuous
-                )
-                .fill(PlainwordTheme.accent.opacity(0.06))
-            }
-        }
-        .plainwordGlass(cornerRadius: PlainwordTheme.cardCornerRadius, shadow: true)
+        .plainwordCard(
+            cornerRadius: PlainwordTheme.cardCornerRadius,
+            fill: isHovering ? PlainwordTheme.raisedSurface : PlainwordTheme.surface,
+            border: isHovering ? PlainwordTheme.accent : PlainwordTheme.separator
+        )
         .onHover { isHovering = $0 }
-        .animation(.easeOut(duration: 0.12), value: isHovering)
+        .animation(PlainwordMotion.content, value: isHovering)
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel(accessibilityLabel)

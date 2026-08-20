@@ -12,20 +12,24 @@ export function Section({ id, className = '', children }) {
   );
 }
 
-/** Eyebrow + heading + optional lead, styled identically in every section. */
+/**
+ * Eyebrow + heading + optional lead, styled identically in every section.
+ * The eyebrow is the app's "machinery voice" (mono, uppercase, tracked out),
+ * the heading its "writing voice" (serif).
+ */
 export function SectionHeading({ eyebrow, title, lead, align = 'left', className = '' }) {
   const centered = align === 'center';
   return (
     <Reveal className={`${centered ? 'text-center' : ''} ${className}`}>
       {eyebrow && (
-        <p className="mb-3 text-2xs font-semibold tracking-[0.14em] text-brand uppercase">
+        <p className="mb-3 font-mono text-[11px] tracking-[0.12em] text-accent uppercase">
           {eyebrow}
         </p>
       )}
-      <h2 className="text-h2 font-bold text-balance">{title}</h2>
+      <h2 className="text-h2 text-balance">{title}</h2>
       {lead && (
         <p
-          className={`mt-4 max-w-[560px] text-md text-pretty text-ink-soft ${
+          className={`mt-4 max-w-[580px] text-md text-pretty text-ink-soft ${
             centered ? 'mx-auto' : ''
           }`}
         >

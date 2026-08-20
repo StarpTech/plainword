@@ -42,10 +42,10 @@ function SetupLine({ setup, mono }) {
             type="button"
             onClick={copy}
             aria-label={copied ? 'Command copied' : `Copy ${setup}`}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control border border-line bg-surface text-ink-soft transition-colors hover:border-brand-soft hover:text-brand"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control border border-line bg-surface text-ink-soft transition-colors hover:border-line-strong hover:text-accent"
           >
             {copied ? (
-              <Check className="h-4 w-4 text-brand" strokeWidth={2} />
+              <Check className="h-4 w-4 text-accent" strokeWidth={2} />
             ) : (
               <Copy className="h-4 w-4" strokeWidth={2} />
             )}
@@ -62,19 +62,19 @@ function ModelCard({ model, delay }) {
     <Reveal
       delay={delay}
       className={
-        'flex flex-col rounded-panel border p-[clamp(24px,3.5vw,36px)] shadow-card ' +
-        'transition-all duration-300 hover:-translate-y-1 hover:shadow-card-lift ' +
-        (accent ? 'border-brand-soft bg-surface' : 'border-line bg-surface')
+        'flex flex-col rounded-panel border p-[clamp(24px,3.5vw,36px)] shadow-paper ' +
+        'transition-all duration-300 hover:-translate-y-1 hover:shadow-paper-lift ' +
+        (accent ? 'border-line-strong bg-surface' : 'border-line bg-surface')
       }
     >
-      <p className="text-2xs font-semibold tracking-[0.14em] text-brand uppercase">{eyebrow}</p>
+      <p className="text-2xs font-semibold tracking-[0.14em] text-accent uppercase">{eyebrow}</p>
       <h3 className="mt-3 text-h2 font-bold tracking-tight">{name}</h3>
       <p className="mt-2 text-xs text-ink-faint">{via}</p>
       <p className="mt-4 text-sm text-pretty text-ink-soft">{text}</p>
       <ul className="mt-6 flex flex-col gap-2.5">
         {points.map((point) => (
           <li key={point} className="flex items-start gap-2.5 text-sm">
-            <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-brand" aria-hidden="true" />
+            <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />
             <span>{point}</span>
           </li>
         ))}
@@ -93,7 +93,7 @@ export default function RecommendedModel() {
         align="center"
         eyebrow="Recommended"
         title="Two models worth starting with."
-        lead="Any OpenAI-compatible model works. If you would rather not read a leaderboard, these two cover the choice most people are actually making: keep it on the machine, or get the smarter answer."
+        lead="Any OpenAI-compatible model works. These two cover the real choice: keep it on the machine, or get the smarter answer."
       />
       <div className="mt-12 grid gap-5 md:grid-cols-2">
         {RECOMMENDED_MODELS.map((model, i) => (
@@ -101,8 +101,8 @@ export default function RecommendedModel() {
         ))}
       </div>
       <Reveal delay={200} className="mt-8 text-center text-xs text-ink-faint">
-        Switch between them whenever you want. Local timing measured on an Apple silicon MacBook Pro
-        with the model already loaded; pricing is Google&rsquo;s at the time of writing.
+        Timing measured on an Apple silicon MacBook Pro with the model loaded; pricing is
+        Google&rsquo;s at the time of writing.
       </Reveal>
     </Section>
   );

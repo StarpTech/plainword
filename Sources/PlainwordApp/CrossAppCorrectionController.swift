@@ -549,7 +549,12 @@ final class CrossAppCorrectionController: ObservableObject {
             pendingSuggestion = nil
             activity = .failure(error.localizedDescription)
             if isProposalVisible {
-                proposalPanel.showFailure(error.localizedDescription)
+                proposalPanel.showFailure(error.localizedDescription) { [weak self] in
+                    self?.retryCorrection(
+                        for: capturedSnapshot,
+                        compactPresentation: compactPresentation
+                    )
+                }
             }
         }
     }
@@ -589,9 +594,10 @@ final class CrossAppCorrectionController: ObservableObject {
         pendingPanelAnchor = anchor
         proposalPanel.showPrompt(
             near: anchor,
-            title: snapshot.context.targetKind == .document
-                ? "Transform entire field"
-                : "Transform selection",
+            title: Self.transformPromptTitle(
+                for: snapshot,
+                previousSuggestion: previousSuggestion
+            ),
             onSubmit: { [weak self] prompt in
                 self?.submitCustomPrompt(
                     prompt,
@@ -604,6 +610,26 @@ final class CrossAppCorrectionController: ObservableObject {
                 self?.dismissProposal()
             }
         )
+    }
+
+    /// A draft has not been inserted anywhere yet, so a transform of one is named by
+    /// the text it acts on rather than by the empty field behind it.
+    private static func transformPromptTitle(
+        for snapshot: FocusedTextSnapshot,
+        previousSuggestion: WritingSuggestion?
+    ) -> String {
+        if previousSuggestion?.kind == .composition {
+            return "Transform draft"
+        }
+        return snapshot.context.targetKind == .document
+            ? "Transform entire field"
+            : "Transform selection"
+    }
+
+    /// Names what a transform is working on, so a failure reads the same way whether the
+    /// text came from the field or from a draft waiting to be inserted.
+    private static func transformSubject(previousSuggestion: WritingSuggestion?) -> String {
+        previousSuggestion?.kind == .composition ? "draft" : "selected text"
     }
 
     private func presentComposePrompt(for snapshot: FocusedTextSnapshot) {
@@ -733,7 +759,9 @@ final class CrossAppCorrectionController: ObservableObject {
             pendingCorrectionText = nil
             pendingSuggestion = nil
             activity = .failure(error.localizedDescription)
-            proposalPanel.showFailure(error.localizedDescription)
+            proposalPanel.showFailure(error.localizedDescription) { [weak self] in
+                self?.retryComposition(instruction, for: snapshot)
+            }
         }
     }
 
@@ -885,7 +913,8 @@ final class CrossAppCorrectionController: ObservableObject {
         }
         guard accessibility.snapshotState(snapshot) == .unchanged else {
             dismissProposal()
-            activity = .failure("The selected text changed before it could be transformed.")
+            let subject = Self.transformSubject(previousSuggestion: previousSuggestion)
+            activity = .failure("The \(subject) changed before it could be transformed.")
             return
         }
 
@@ -926,6 +955,10 @@ final class CrossAppCorrectionController: ObservableObject {
             forApplicationIdentifier: snapshot.applicationIdentifier
         )
         let locale = promptLanguageIdentifier(for: editContext)
+        // Transforming a draft leaves it a draft: the field is still empty, so the
+        // result has no original in it to diff against or mark up.
+        let isDraft = previousSuggestion?.kind == .composition
+        let subject = Self.transformSubject(previousSuggestion: previousSuggestion)
 
         do {
             var correctionResponse: CorrectionResponse?
@@ -954,24 +987,27 @@ final class CrossAppCorrectionController: ObservableObject {
                 pendingCorrectionText = nil
                 pendingSuggestion = nil
                 dismissProposalUI()
-                activity = .failure("The selected text changed before it could be transformed.")
+                activity = .failure("The \(subject) changed before it could be transformed.")
                 return
             }
 
             guard correctionResponse.correctedText != editContext.text else {
                 dismissProposal()
-                activity = .failure("That instruction did not change the selected text.")
+                activity = .failure("That instruction did not change the \(subject).")
                 return
             }
 
-            guard let suggestion = WritingSuggestionPlanner.make(
-                originalText: snapshot.context.text,
-                replacementText: correctionResponse.correctedText,
-                completionIsAllowed: false,
-                classifiedAs: correctionResponse.classification
-            ) else {
+            let planned = isDraft
+                ? WritingSuggestionPlanner.makeComposition(correctionResponse.correctedText)
+                : WritingSuggestionPlanner.make(
+                    originalText: snapshot.context.text,
+                    replacementText: correctionResponse.correctedText,
+                    completionIsAllowed: false,
+                    classifiedAs: correctionResponse.classification
+                )
+            guard let suggestion = planned else {
                 dismissProposal()
-                activity = .failure("That instruction did not change the selected text.")
+                activity = .failure("That instruction did not change the \(subject).")
                 return
             }
             if let previousSuggestion {
@@ -987,8 +1023,79 @@ final class CrossAppCorrectionController: ObservableObject {
             pendingCorrectionText = nil
             pendingSuggestion = nil
             activity = .failure(error.localizedDescription)
-            proposalPanel.showFailure(error.localizedDescription)
+            proposalPanel.showFailure(error.localizedDescription) { [weak self] in
+                self?.retryCustomEdit(
+                    instruction,
+                    for: snapshot,
+                    editing: capturedEditContext,
+                    previousSuggestion: previousSuggestion
+                )
+            }
         }
+    }
+
+    /// Runs a request again from the panel that reported it failed.
+    ///
+    /// The failure cleared everything pending, so each retry carries the same values
+    /// its first attempt was given rather than reading state that is no longer there.
+    private func retryCorrection(
+        for snapshot: FocusedTextSnapshot,
+        compactPresentation: Bool
+    ) {
+        let generation = beginRetry(for: snapshot)
+        correctionTask = Task { [weak self] in
+            await self?.requestCorrection(
+                for: snapshot,
+                generation: generation,
+                compactPresentation: compactPresentation
+            )
+        }
+    }
+
+    private func retryComposition(
+        _ instruction: String,
+        for snapshot: FocusedTextSnapshot
+    ) {
+        let generation = beginRetry(for: snapshot)
+        correctionTask = Task { [weak self] in
+            await self?.requestComposition(
+                instruction,
+                for: snapshot,
+                generation: generation
+            )
+        }
+    }
+
+    private func retryCustomEdit(
+        _ instruction: String,
+        for snapshot: FocusedTextSnapshot,
+        editing editContext: TextEditContext,
+        previousSuggestion: WritingSuggestion?
+    ) {
+        let generation = beginRetry(for: snapshot)
+        correctionTask = Task { [weak self] in
+            await self?.requestCustomEdit(
+                instruction,
+                for: snapshot,
+                editing: editContext,
+                previousSuggestion: previousSuggestion,
+                generation: generation
+            )
+        }
+    }
+
+    private func beginRetry(for snapshot: FocusedTextSnapshot) -> Int {
+        correctionGeneration &+= 1
+        activity = .correcting(snapshot.applicationName)
+        proposalPanel.showProcessing(
+            near: pendingPanelAnchor ?? snapshot.anchor,
+            onAccept: {},
+            onDismiss: { [weak self] in
+                self?.dismissProposal()
+            }
+        )
+        isProposalVisible = true
+        return correctionGeneration
     }
 
     func isContextSendingEnabled(forApplicationIdentifier identifier: String?) -> Bool {
@@ -1503,7 +1610,7 @@ final class CrossAppCorrectionController: ObservableObject {
         }
     }
 
-    private func dismissProposalUI() {
+    private func dismissProposalUI(showingApplied: Bool = false) {
         isProposalVisible = false
         isProposalSuspended = false
         isCustomPromptVisible = false
@@ -1513,7 +1620,11 @@ final class CrossAppCorrectionController: ObservableObject {
         isPanelAnchorPinned = false
         sourceWindowFrame = nil
         stopSourceOverlay()
-        proposalPanel.dismiss()
+        if showingApplied {
+            proposalPanel.showApplied()
+        } else {
+            proposalPanel.dismiss()
+        }
     }
 
     private func suspendProposalUI() {
@@ -1724,7 +1835,9 @@ final class CrossAppCorrectionController: ObservableObject {
             pendingCorrectionText = nil
             pendingSuggestion = nil
             suggestionHistory.removeAll()
-            dismissProposalUI()
+            // The panel is replaced by a receipt rather than simply vanishing, so the
+            // edit that just landed is confirmed where the author was already looking.
+            dismissProposalUI(showingApplied: true)
             updateIdleActivity()
         } catch is CancellationError {
             // Dismissing the proposal intentionally cancels pending verification.

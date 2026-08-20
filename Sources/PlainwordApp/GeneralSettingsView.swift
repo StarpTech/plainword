@@ -11,165 +11,167 @@ struct GeneralSettingsView: View {
         SettingsPage {
             SettingsPageHeader(
                 title: "General",
-                subtitle: "Control when and where Plainword helps.",
-                icon: "gearshape"
+                subtitle: "Control when and where Plainword helps."
             )
 
-            VStack(alignment: .leading, spacing: 8) {
-                SettingsSectionLabel("Suggestions")
-                SettingsGroup {
-                    SettingsRow(
-                        "Suggestions",
-                        icon: "sparkles",
-                        detail: "Enable explicit review and transform shortcuts."
-                    ) {
-                        Toggle("Suggestions", isOn: listeningBinding)
-                            .labelsHidden()
-                            .toggleStyle(.switch)
-                            .tint(PlainwordTheme.accent)
-                    }
+            SettingsSection("Setup") {
+                SettingsRow(
+                    "Provider",
+                    detail: "The language model that powers your suggestions."
+                ) {
+                    StatusPill(
+                        title: settings.isLLMConfigured ? "Configured" : "Not configured",
+                        color: settings.isLLMConfigured
+                            ? PlainwordTheme.accent
+                            : PlainwordTheme.warning,
+                        systemImage: settings.isLLMConfigured ? "checkmark" : "exclamationmark",
+                        wash: settings.isLLMConfigured
+                            ? PlainwordTheme.accentMuted
+                            : PlainwordTheme.fieldSurface
+                    )
+                }
 
-                    SettingsDivider()
+                SettingsDivider()
 
-                    SettingsRow(
-                        "Review text",
-                        icon: "keyboard",
-                        detail: "Requests a correction for the selection or current paragraph. Default: ⌘F2."
-                    ) {
-                        PopoverShortcutRecorder(
-                            shortcut: $settings.popoverShortcut,
-                            conflictingShortcut: settings.transformShortcut
-                        )
-                    }
-
-                    SettingsDivider()
-
-                    SettingsRow(
-                        "Transform text",
-                        icon: "wand.and.stars",
-                        detail: "Opens transform mode for the selection or whole focused field. Default: ⇧⌘F2."
-                    ) {
-                        PopoverShortcutRecorder(
-                            shortcut: $settings.transformShortcut,
-                            conflictingShortcut: settings.popoverShortcut
-                        )
-                    }
-
-                    SettingsDivider()
-
-                    SettingsRow("Status", icon: "circle.dotted") {
+                SettingsRow(
+                    "Accessibility",
+                    detail: "Lets Plainword read the focused text and nearby context, "
+                        + "and replace only the focused text."
+                ) {
+                    if corrections.isAccessibilityTrusted {
                         StatusPill(
-                            title: corrections.activity.label,
-                            color: statusColor
+                            title: "Allowed",
+                            color: PlainwordTheme.accent,
+                            systemImage: "checkmark",
+                            wash: PlainwordTheme.accentMuted
                         )
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                SettingsSectionLabel("Appearance")
-                SettingsGroup {
-                    SettingsRow(
-                        "Theme",
-                        icon: "circle.lefthalf.filled",
-                        detail: "Choose how Plainword appears."
-                    ) {
-                        AppearancePicker(selection: $settings.appearance)
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                SettingsSectionLabel("Excluded Apps")
-                SettingsGroup {
-                    if corrections.excludedApplications.isEmpty {
-                        SettingsRow(
-                            "No excluded apps",
-                            icon: "app.badge",
-                            detail: "Use the menu-bar item while another app is active to ignore it."
-                        ) {
-                            EmptyView()
-                        }
                     } else {
-                        ForEach(Array(corrections.excludedApplications.enumerated()), id: \.element.id) {
-                            index, application in
-                            ExcludedApplicationRow(
-                                application: application,
-                                icon: corrections.icon(for: application)
-                            ) {
-                                corrections.allowSuggestions(in: application)
+                        HStack(spacing: 8) {
+                            Button("Allow Access") {
+                                corrections.requestAccessibilityAccess()
                             }
+                            .buttonStyle(PlainwordButtonStyle(.primary))
 
-                            if index < corrections.excludedApplications.count - 1 {
-                                SettingsDivider()
+                            Button("Open Settings") {
+                                corrections.openAccessibilitySettings()
                             }
+                            .buttonStyle(PlainwordButtonStyle())
                         }
-                    }
-
-                    SettingsDivider()
-
-                    SettingsRow(
-                        "Add an app",
-                        icon: "plus.app",
-                        detail: "Choose an installed app that Plainword should ignore."
-                    ) {
-                        Button("Add App…") {
-                            chooseApplicationToExclude()
-                        }
-                        .buttonStyle(PlainwordButtonStyle())
                     }
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                SettingsSectionLabel("Setup")
-                SettingsGroup {
+            SettingsSection("Suggestions") {
+                SettingsRow(
+                    "Suggestions",
+                    detail: "Enable explicit review and transform shortcuts."
+                ) {
+                    Toggle("Suggestions", isOn: listeningBinding)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .tint(PlainwordTheme.accent)
+                }
+
+                SettingsDivider()
+
+                SettingsRow(
+                    "Review text",
+                    detail: "Requests a correction for the selection or current paragraph."
+                ) {
+                    PopoverShortcutRecorder(
+                        shortcut: $settings.popoverShortcut,
+                        conflictingShortcut: settings.transformShortcut
+                    )
+                }
+
+                SettingsDivider()
+
+                SettingsRow(
+                    "Transform text",
+                    detail: "Opens transform mode for the selection or whole focused field."
+                ) {
+                    PopoverShortcutRecorder(
+                        shortcut: $settings.transformShortcut,
+                        conflictingShortcut: settings.popoverShortcut
+                    )
+                }
+
+                SettingsDivider()
+
+                SettingsRow("Status") {
+                    StatusPill(
+                        title: corrections.activity.label,
+                        color: statusColor,
+                        wash: isListening ? PlainwordTheme.accentMuted : PlainwordTheme.fieldSurface
+                    )
+                }
+            }
+
+            SettingsSection("Appearance") {
+                SettingsRow("Theme", detail: "Choose how Plainword appears.") {
+                    PlainwordSegmentedControl(
+                        segments: AppAppearance.allCases.map {
+                            PlainwordSegment($0, $0.title)
+                        },
+                        selection: $settings.appearance,
+                        accessibilityLabel: "Theme"
+                    )
+                }
+
+                SettingsDivider()
+
+                SettingsRow(
+                    "Show in Dock",
+                    detail: "Turn this off to keep Plainword out of the Dock and the "
+                        + "app switcher. The menu-bar item stays."
+                ) {
+                    Toggle("Show in Dock", isOn: $settings.showsDockIcon)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .tint(PlainwordTheme.accent)
+                }
+            }
+
+            SettingsSection("Excluded apps") {
+                if corrections.excludedApplications.isEmpty {
                     SettingsRow(
-                        "Provider",
-                        icon: "server.rack",
-                        detail: "The language model that powers your suggestions."
+                        "No excluded apps",
+                        detail: "Use the menu-bar item while another app is active to ignore it."
                     ) {
-                        StatusPill(
-                            title: settings.isLLMConfigured ? "Configured" : "Not configured",
-                            color: settings.isLLMConfigured
-                                ? PlainwordTheme.success
-                                : PlainwordTheme.warning,
-                            systemImage: settings.isLLMConfigured ? "checkmark" : "exclamationmark"
-                        )
+                        EmptyView()
                     }
+                } else {
+                    ForEach(Array(corrections.excludedApplications.enumerated()), id: \.element.id) {
+                        index, application in
+                        ExcludedApplicationRow(
+                            application: application,
+                            icon: corrections.icon(for: application)
+                        ) {
+                            corrections.allowSuggestions(in: application)
+                        }
 
-                    SettingsDivider()
-
-                    SettingsRow(
-                        "Accessibility",
-                        icon: "accessibility",
-                        detail: "Lets Plainword read the focused text and nearby context, and replace only the focused text."
-                    ) {
-                        if corrections.isAccessibilityTrusted {
-                            StatusPill(
-                                title: "Allowed",
-                                color: PlainwordTheme.success,
-                                systemImage: "checkmark"
-                            )
-                        } else {
-                            HStack(spacing: 8) {
-                                Button("Allow Access") {
-                                    corrections.requestAccessibilityAccess()
-                                }
-                                .buttonStyle(PlainwordButtonStyle(.primary))
-
-                                Button("Open Settings") {
-                                    corrections.openAccessibilitySettings()
-                                }
-                                .buttonStyle(PlainwordButtonStyle())
-                            }
+                        if index < corrections.excludedApplications.count - 1 {
+                            SettingsDivider()
                         }
                     }
+                }
+
+                SettingsDivider()
+
+                SettingsRow(
+                    "Add an app",
+                    detail: "Choose an installed app that Plainword should ignore."
+                ) {
+                    Button("Add App…") {
+                        chooseApplicationToExclude()
+                    }
+                    .buttonStyle(PlainwordButtonStyle())
                 }
             }
         }
-        .navigationTitle("General")
-        .animation(.snappy(duration: 0.2), value: settings.appearance)
+        .animation(PlainwordMotion.content, value: settings.appearance)
         .alert("Couldn’t Add App", isPresented: $isShowingExclusionError) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -184,10 +186,16 @@ struct GeneralSettingsView: View {
         )
     }
 
+    private var isListening: Bool {
+        corrections.isListeningEnabled
+            && !corrections.isActiveApplicationExcluded
+            && corrections.isReady
+    }
+
     private var statusColor: Color {
         if !corrections.isListeningEnabled { return PlainwordTheme.textTertiary }
         if corrections.isActiveApplicationExcluded { return PlainwordTheme.textTertiary }
-        return corrections.isReady ? PlainwordTheme.success : PlainwordTheme.warning
+        return corrections.isReady ? PlainwordTheme.accent : PlainwordTheme.warning
     }
 
     private func chooseApplicationToExclude() {
@@ -319,10 +327,13 @@ struct PopoverShortcut: Codable, Equatable {
     }
 }
 
+/// A shortcut that reads as a key: the recorder is the keycap itself, so the row
+/// shows the binding rather than a control that talks about it.
 private struct PopoverShortcutRecorder: View {
     @Binding var shortcut: PopoverShortcut?
     let conflictingShortcut: PopoverShortcut?
     @StateObject private var recorder = PopoverShortcutRecorderController()
+    @State private var isHovering = false
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
@@ -336,20 +347,13 @@ private struct PopoverShortcutRecorder: View {
                         }
                     }
                 } label: {
-                    HStack(spacing: 6) {
-                        if recorder.isRecording {
-                            Circle()
-                                .fill(PlainwordTheme.accent)
-                                .frame(width: 6, height: 6)
-                        }
-                        Text(recorder.isRecording
-                            ? "Press shortcut…"
-                            : shortcut?.displayText ?? "Record Shortcut")
-                            .monospacedDigit()
-                    }
-                    .frame(minWidth: 104)
+                    keycap
                 }
-                .buttonStyle(PlainwordButtonStyle(recorder.isRecording ? .primary : .secondary))
+                .buttonStyle(.plain)
+                .onHover { isHovering = $0 }
+                .help("Click to record a new shortcut")
+                .accessibilityLabel("Review shortcut")
+                .accessibilityValue(shortcut?.displayText ?? "None")
 
                 if shortcut != nil, !recorder.isRecording {
                     Button {
@@ -357,7 +361,7 @@ private struct PopoverShortcutRecorder: View {
                         recorder.clearError()
                     } label: {
                         Image(systemName: "xmark")
-                            .frame(width: 16, height: 16)
+                            .font(PlainwordFont.ui(10, weight: .bold))
                     }
                     .buttonStyle(PlainwordButtonStyle(.quiet))
                     .help("Clear shortcut")
@@ -367,12 +371,51 @@ private struct PopoverShortcutRecorder: View {
 
             if let errorMessage = recorder.errorMessage {
                 Text(errorMessage)
-                    .font(.system(size: 10))
+                    .font(PlainwordFont.ui(10))
                     .foregroundStyle(PlainwordTheme.warning)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .animation(PlainwordMotion.content, value: recorder.isRecording)
         .onDisappear { recorder.cancel() }
+    }
+
+    private var keycap: some View {
+        HStack(spacing: 6) {
+            if recorder.isRecording {
+                Circle()
+                    .fill(PlainwordTheme.accent)
+                    .frame(width: 6, height: 6)
+            }
+            Text(recorder.isRecording
+                ? "Press shortcut…"
+                : shortcut?.displayText ?? "Record")
+                .font(PlainwordFont.mono(12))
+                .foregroundStyle(
+                    recorder.isRecording
+                        ? PlainwordTheme.accent
+                        : PlainwordTheme.textPrimary
+                )
+        }
+        .frame(minWidth: 46)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            recorder.isRecording
+                ? PlainwordTheme.accentMuted
+                : (isHovering ? PlainwordTheme.raisedSurface : PlainwordTheme.fieldSurface),
+            in: RoundedRectangle(cornerRadius: PlainwordTheme.pillCornerRadius, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: PlainwordTheme.pillCornerRadius, style: .continuous)
+                .strokeBorder(
+                    recorder.isRecording
+                        ? PlainwordTheme.accent
+                        : PlainwordTheme.strongSeparator,
+                    lineWidth: 1
+                )
+        }
+        .contentShape(Rectangle())
     }
 }
 
@@ -463,17 +506,19 @@ private struct ExcludedApplicationRow: View {
                         .scaledToFit()
                 } else {
                     Image(systemName: "app")
-                        .foregroundStyle(PlainwordTheme.textSecondary)
+                        .foregroundStyle(PlainwordTheme.textTertiary)
                 }
             }
             .frame(width: 21, height: 21)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(application.name)
+                    .font(PlainwordFont.ui(13, weight: .bold))
                 Text(application.id)
-                    .font(.caption)
-                    .foregroundStyle(PlainwordTheme.textSecondary)
+                    .font(PlainwordFont.mono(10))
+                    .foregroundStyle(PlainwordTheme.textTertiary)
                     .lineLimit(1)
+                    .truncationMode(.middle)
             }
 
             Spacer(minLength: 16)
@@ -483,49 +528,7 @@ private struct ExcludedApplicationRow: View {
             }
             .buttonStyle(PlainwordButtonStyle(.danger))
         }
-        .frame(minHeight: 42)
+        .frame(minHeight: 48)
         .padding(.vertical, PlainwordTheme.settingsRowVerticalPadding)
-    }
-}
-
-private struct AppearancePicker: View {
-    @Binding var selection: AppAppearance
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(AppAppearance.allCases) { appearance in
-                Button {
-                    selection = appearance
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: appearance.systemImage)
-                            .font(.system(size: 10, weight: .semibold))
-                        Text(appearance.title)
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundStyle(
-                        selection == appearance
-                            ? PlainwordTheme.textPrimary
-                            : PlainwordTheme.textSecondary
-                    )
-                    .padding(.horizontal, 8)
-                    .frame(height: 27)
-                    .background {
-                        if selection == appearance {
-                            Color.clear
-                                .plainwordGlass(
-                                    cornerRadius: 7,
-                                    tint: PlainwordTheme.accent.opacity(0.13),
-                                    interactive: true
-                                )
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selection == appearance ? .isSelected : [])
-            }
-        }
-        .padding(2)
-        .plainwordGlass(cornerRadius: 9)
     }
 }

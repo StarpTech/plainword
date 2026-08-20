@@ -24,8 +24,8 @@ struct DebugPayloadTextView: NSViewRepresentable {
         textView.isRichText = false
         textView.drawsBackground = false
         textView.textContainerInset = NSSize(width: 11, height: 11)
-        textView.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
-        textView.textColor = .labelColor
+        textView.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        textView.textColor = NSColor(PlainwordTheme.textPrimary)
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
         // Wrap rather than scroll sideways: reading a payload in two axes is miserable.
@@ -49,14 +49,15 @@ struct DebugPayloadTextView: NSViewRepresentable {
 struct DebugPayloadPane: View {
     let title: String
     let text: String
+    var maxHeight: CGFloat = 220
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Text(title)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(PlainwordFont.ui(12, weight: .bold))
                 Text(sizeLabel)
-                    .font(.caption)
+                    .font(PlainwordFont.mono(10))
                     .foregroundStyle(PlainwordTheme.textSecondary)
                 Spacer(minLength: 8)
                 DebugCopyButton(text: text, subject: title)
@@ -65,31 +66,26 @@ struct DebugPayloadPane: View {
             .padding(.vertical, 8)
 
             Rectangle()
-                .fill(PlainwordTheme.separator.opacity(0.7))
+                .fill(PlainwordTheme.separator)
                 .frame(height: 1)
 
             if text.isEmpty {
                 Text("Nothing was recorded for this section.")
-                    .font(.caption)
+                    .font(PlainwordFont.ui(11))
                     .foregroundStyle(PlainwordTheme.textSecondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 22)
             } else {
                 DebugPayloadTextView(text: text, accessibilityLabel: title)
+                    .frame(height: maxHeight)
             }
         }
-        .background(
-            PlainwordTheme.raisedSurface.opacity(0.7),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(PlainwordTheme.separator.opacity(0.8), lineWidth: 1)
-        }
+        .plainwordCard(cornerRadius: 10, fill: PlainwordTheme.raisedSurface)
     }
 
     private var sizeLabel: String {
         let count = text.count
-        return "\(count.formatted()) " + (count == 1 ? "character" : "characters")
+        return "\(count.formatted()) " + (count == 1 ? "char" : "chars")
     }
 }
 
@@ -110,11 +106,11 @@ struct DebugCopyButton: View {
                 didCopy = false
             }
         } label: {
-            Label(didCopy ? "Copied" : "Copy", systemImage: didCopy ? "checkmark" : "doc.on.doc")
-                .font(.caption)
+            Text(didCopy ? "\u{2713} Copied" : "Copy")
         }
         .buttonStyle(PlainwordButtonStyle(.quiet))
         .disabled(text.isEmpty)
+        .animation(PlainwordMotion.content, value: didCopy)
         .help("Copy the complete \(subject.lowercased()) to the clipboard")
         .accessibilityLabel(didCopy ? "Copied \(subject)" : "Copy \(subject)")
     }

@@ -1,0 +1,14 @@
+{
+  "name": "Plainword",
+  "short_name": "Plainword",
+  "description": "AI writing assistant for every macOS app.",
+  "start_url": "/",
+  "display": "browser",
+  "background_color": "#EFE9DD",
+  "theme_color": "#EFE9DD",
+  "icons": [
+    { "src": "/images/icon-192.png", "type": "image/png", "sizes": "192x192" },
+    { "src": "/images/app-icon.png", "type": "image/png", "sizes": "512x512" },
+    { "src": "/images/apple-touch-icon.png", "type": "image/png", "sizes": "180x180" }
+  ]
+}

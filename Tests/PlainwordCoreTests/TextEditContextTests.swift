@@ -46,6 +46,55 @@ final class TextEditContextTests: XCTestCase {
         XCTAssertEqual(context.utf16Length, 0)
     }
 
+    func testInsertionPointAcceptsACaretOnABlankLineBetweenParagraphs() throws {
+        let text = "we were walki\n\nThat's great."
+        let context = try XCTUnwrap(
+            TextEditContextExtractor.insertionPoint(in: text, at: 14)
+        )
+
+        XCTAssertEqual(context.text, "")
+        XCTAssertEqual(context.utf16Location, 14)
+        XCTAssertEqual(context.utf16Length, 0)
+        XCTAssertEqual(context.targetKind, .insertionPoint)
+        // The paragraphs on either side are all a compose request has to write from.
+        XCTAssertEqual(context.leadingContext, "we were walki")
+        XCTAssertEqual(context.trailingContext, "That's great.")
+    }
+
+    func testInsertionPointAcceptsACaretOnATrailingBlankLine() throws {
+        let context = try XCTUnwrap(
+            TextEditContextExtractor.insertionPoint(in: "Already here.\n", at: 14)
+        )
+
+        XCTAssertEqual(context.utf16Location, 14)
+        XCTAssertEqual(context.leadingContext, "Already here.")
+        XCTAssertEqual(context.trailingContext, "")
+    }
+
+    func testInsertionPointRefusesACaretOnALineThatHasText() {
+        let text = "we were walki\n\nThat's great."
+        // Ends of both written lines, and the start of the second one.
+        XCTAssertNil(TextEditContextExtractor.insertionPoint(in: text, at: 13))
+        XCTAssertNil(TextEditContextExtractor.insertionPoint(in: text, at: 15))
+        XCTAssertNil(TextEditContextExtractor.insertionPoint(in: text, at: 28))
+    }
+
+    func testWritingIntoABlankLineInsertsBetweenTheParagraphs() throws {
+        let text = "we were walki\n\nThat's great."
+        let context = try XCTUnwrap(
+            TextEditContextExtractor.insertionPoint(in: text, at: 14)
+        )
+
+        XCTAssertEqual(
+            TextEditContextExtractor.replacing(
+                context: context,
+                in: text,
+                with: "We were walking."
+            ),
+            "we were walki\nWe were walking.\nThat's great."
+        )
+    }
+
     func testWritingIntoAnEmptyFieldInsertsAtTheCaret() throws {
         let context = try XCTUnwrap(
             TextEditContextExtractor.insertionPoint(in: "", at: 0)

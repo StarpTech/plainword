@@ -1,96 +1,212 @@
 @import "tailwindcss";
 
 /* ---------------------------------------------------------------------------
-   Design tokens. Every colour, size, radius, shadow and easing used on the
-   site comes from here. Components should not invent one-off values.
+   Plainword Ink — the app's design system, on the web.
+
+   Raw tokens live on :root and get swapped wholesale in dark mode; the @theme
+   block below only maps them onto Tailwind utility names. Components should
+   never invent a one-off colour, radius or shadow.
    --------------------------------------------------------------------------- */
-@theme {
+
+/* Light — "paper" ------------------------------------------------------- */
+:root {
+  --pw-canvas: #efe9dd;
+  --pw-surface: #fbf8f1;
+  --pw-raised: #f4efe4;
+  --pw-field: #f1ebde;
+
+  --pw-ink: #26211a;
+  --pw-ink-soft: #6f6759;
+  --pw-ink-faint: #9c937f;
+
+  --pw-line: #e3dccb;
+  --pw-line-strong: #d2c9b4;
+
+  --pw-accent: #33684c;
+  --pw-accent-strong: #27543d;
+  --pw-accent-muted: #e3ebe0;
+  --pw-accent-ink: #f7f4ea;
+
+  --pw-danger: #a6453e;
+  --pw-danger-muted: #f5e3de;
+  --pw-warning: #96690f;
+  --pw-selection: #e8e2d2;
+
+  --pw-shadow: 0 18px 44px rgb(72 56 28 / 0.16), 0 3px 8px rgb(72 56 28 / 0.08);
+  --pw-shadow-soft: 0 1px 2px rgb(72 56 28 / 0.05), 0 6px 18px rgb(72 56 28 / 0.06);
+  --pw-shadow-lift: 0 2px 5px rgb(72 56 28 / 0.06), 0 20px 40px rgb(72 56 28 / 0.13);
+  --pw-shadow-hairline: 0 1px 0 rgb(72 56 28 / 0.06);
+
+  /* The menu bar strip in the demo is always a dark macOS bar. */
+  --pw-menubar: #1e1b16;
+  --pw-menubar-ink: #d8d2c6;
+  --pw-menubar-stop: #8cbd9b;
+}
+
+/* Dark — "lamplight" ---------------------------------------------------- */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --pw-canvas: #191612;
+    --pw-surface: #242019;
+    --pw-raised: #2b261e;
+    --pw-field: #1e1a14;
+
+    --pw-ink: #efe8da;
+    --pw-ink-soft: #a79d8a;
+    --pw-ink-faint: #7e7562;
+
+    --pw-line: #383227;
+    --pw-line-strong: #463e30;
+
+    --pw-accent: #8cbd9b;
+    --pw-accent-strong: #a5cfb2;
+    --pw-accent-muted: #2c3a2f;
+    --pw-accent-ink: #161b15;
+
+    --pw-danger: #d08b80;
+    --pw-danger-muted: #3c2823;
+    --pw-warning: #d9a84e;
+    --pw-selection: #332d23;
+
+    --pw-shadow: 0 18px 44px rgb(0 0 0 / 0.5), 0 3px 8px rgb(0 0 0 / 0.3);
+    --pw-shadow-soft: 0 1px 2px rgb(0 0 0 / 0.3), 0 6px 18px rgb(0 0 0 / 0.28);
+    --pw-shadow-lift: 0 2px 5px rgb(0 0 0 / 0.35), 0 20px 40px rgb(0 0 0 / 0.45);
+    --pw-shadow-hairline: 0 1px 0 rgb(0 0 0 / 0.35);
+
+    --pw-menubar: #0f0d0a;
+  }
+}
+
+@theme inline {
   /* Surfaces ------------------------------------------------------------- */
-  --color-canvas: #f6f6f8;
-  --color-surface: #ffffff;
-  --color-surface-sunken: #fafafb;
+  --color-canvas: var(--pw-canvas);
+  --color-surface: var(--pw-surface);
+  --color-raised: var(--pw-raised);
+  --color-field: var(--pw-field);
+  --color-selection: var(--pw-selection);
 
   /* Ink ------------------------------------------------------------------ */
-  --color-ink: #1d1d21;
-  --color-ink-soft: #62626b;
-  --color-ink-faint: #8e8e97;
+  --color-ink: var(--pw-ink);
+  --color-ink-soft: var(--pw-ink-soft);
+  --color-ink-faint: var(--pw-ink-faint);
 
   /* Lines ---------------------------------------------------------------- */
-  --color-line: #e6e6ea;
-  --color-line-strong: #d8d8e0;
+  --color-line: var(--pw-line);
+  --color-line-strong: var(--pw-line-strong);
 
-  /* Brand ---------------------------------------------------------------- */
-  --color-brand: #6256c4;
-  --color-brand-strong: #5045a8;
-  --color-brand-soft: #ddd8f6;
-  --color-brand-muted: #eceaf8;
-  --color-lavender: #c6aeff;
-  --color-sky: #7dc8ff;
+  /* Ink green ------------------------------------------------------------ */
+  --color-accent: var(--pw-accent);
+  --color-accent-strong: var(--pw-accent-strong);
+  --color-accent-muted: var(--pw-accent-muted);
+  --color-accent-ink: var(--pw-accent-ink);
 
-  /* Type ----------------------------------------------------------------- */
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  /* Signals -------------------------------------------------------------- */
+  --color-danger: var(--pw-danger);
+  --color-danger-muted: var(--pw-danger-muted);
+  --color-warning: var(--pw-warning);
 
-  --text-2xs: 0.75rem;      /* 12: eyebrows, pills */
+  --color-menubar: var(--pw-menubar);
+  --color-menubar-ink: var(--pw-menubar-ink);
+
+  /* Type — three voices: serif writes, sans labels, mono reports ---------- */
+  --font-serif: "Newsreader", ui-serif, "New York", Georgia, serif;
+  --font-sans: "Nunito Sans", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    Helvetica, Arial, sans-serif;
+  --font-mono: "Fragment Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  --text-2xs: 0.75rem; /* 12: eyebrows, pills */
   --text-2xs--line-height: 1.4;
-  --text-xs: 0.8125rem;     /* 13: captions, footer, chips */
+  --text-xs: 0.8125rem; /* 13: captions, footer, chips */
   --text-xs--line-height: 1.5;
-  --text-sm: 0.875rem;      /* 14: dense body, card text */
+  --text-sm: 0.875rem; /* 14: dense body, card text */
   --text-sm--line-height: 1.65;
-  --text-base: 0.9375rem;   /* 15: default body */
+  --text-base: 0.9375rem; /* 15: default body */
   --text-base--line-height: 1.7;
-  --text-md: 1.0625rem;     /* 17: card titles, section leads */
+  --text-md: 1.0625rem; /* 17: card titles, section leads */
   --text-md--line-height: 1.6;
 
   --text-lead: clamp(1rem, 0.9rem + 0.5vw, 1.1875rem);
   --text-lead--line-height: 1.6;
 
-  --text-h3: 1.0625rem;
-  --text-h3--line-height: 1.4;
-  --text-h3--letter-spacing: -0.01em;
+  --text-h3: 1.125rem;
+  --text-h3--line-height: 1.35;
+  --text-h3--letter-spacing: -0.005em;
 
-  --text-h2: clamp(1.625rem, 1.25rem + 1.6vw, 2.125rem);
-  --text-h2--line-height: 1.12;
-  --text-h2--letter-spacing: -0.025em;
+  --text-h2: clamp(1.75rem, 1.3rem + 1.8vw, 2.375rem);
+  --text-h2--line-height: 1.14;
+  --text-h2--letter-spacing: -0.012em;
 
-  --text-h1: clamp(1.875rem, 1.35rem + 2.2vw, 2.5rem);
-  --text-h1--line-height: 1.1;
-  --text-h1--letter-spacing: -0.028em;
+  --text-h1: clamp(2rem, 1.4rem + 2.4vw, 2.75rem);
+  --text-h1--line-height: 1.12;
+  --text-h1--letter-spacing: -0.014em;
 
-  --text-display: clamp(2.375rem, 1.3rem + 4.4vw, 3.75rem);
-  --text-display--line-height: 1.05;
-  --text-display--letter-spacing: -0.035em;
+  --text-display: clamp(2.5rem, 1.4rem + 4.6vw, 4rem);
+  --text-display--line-height: 1.06;
+  --text-display--letter-spacing: -0.018em;
 
-  /* Radii, semantic so the same kind of thing is always the same shape ------ */
-  --radius-control: 10px;   /* buttons, kbd, small inputs */
-  --radius-tile: 12px;      /* icon tiles, list rows */
-  --radius-card: 16px;      /* cards, framed media */
-  --radius-panel: 24px;     /* large enclosing panels */
+  /* Radii — the app's, scaled up one step for page-level furniture -------- */
+  --radius-control: 8px; /* buttons, keycaps, small inputs */
+  --radius-tile: 11px; /* icon tiles, list rows, cards */
+  --radius-card: 13px; /* the popover panel, framed media */
+  --radius-panel: 18px; /* large enclosing panels */
 
   /* Elevation ------------------------------------------------------------ */
-  --shadow-card: 0 1px 2px rgb(29 29 33 / 0.04), 0 4px 14px rgb(29 29 33 / 0.05);
-  --shadow-card-lift: 0 2px 4px rgb(29 29 33 / 0.05), 0 16px 32px rgb(29 29 33 / 0.09);
-  --shadow-brand: 0 6px 20px rgb(98 86 196 / 0.28);
-  --shadow-brand-lift: 0 10px 28px rgb(98 86 196 / 0.38);
-  /* Filter-based, so they follow the alpha edge of transparent PNGs
-     instead of drawing a box around them. */
-  --drop-shadow-float: 0 18px 36px rgb(29 29 33 / 0.24);
-  --drop-shadow-float-lift: 0 24px 44px rgb(29 29 33 / 0.30);
-  --shadow-panel: 0 24px 64px rgb(29 29 33 / 0.26);
-  --shadow-nav: 0 1px 0 rgb(29 29 33 / 0.04);
+  --shadow-paper: var(--pw-shadow-soft);
+  --shadow-paper-lift: var(--pw-shadow-lift);
+  --shadow-float: var(--pw-shadow);
+  --shadow-hairline: var(--pw-shadow-hairline);
+  --shadow-accent: 0 6px 18px rgb(51 104 76 / 0.24);
+  --shadow-accent-lift: 0 10px 26px rgb(51 104 76 / 0.32);
 
-  /* Motion --------------------------------------------------------------- */
+  /* Motion — the app has one duration: 180ms ease-out --------------------- */
   --ease-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
-  --default-transition-timing-function: var(--ease-soft);
+  --default-transition-timing-function: ease-out;
   --default-transition-duration: 180ms;
 
-  --animate-drift: drift 22s var(--ease-soft) infinite alternate;
-  --animate-drift-slow: drift 30s var(--ease-soft) infinite alternate-reverse;
+  --animate-rise: pwRise 180ms ease-out both;
+  --animate-pop: pwPop 160ms ease-out both;
+  --animate-pulse-caret: pwPulse 1.1s ease-in-out infinite;
+  --animate-draw: pwDraw 1.3s ease-in-out infinite;
+  --animate-chip-in: pwChipIn 200ms ease-out both;
 }
 
-@keyframes drift {
-  from { transform: translate3d(0, 0, 0) scale(1); }
-  to   { transform: translate3d(2.5rem, -1.75rem, 0) scale(1.08); }
+/* The app's motion vocabulary, verbatim. ---------------------------------- */
+@keyframes pwRise {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes pwPop {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes pwPulse {
+  0%, 100% { opacity: 0.25; }
+  50%      { opacity: 1; }
+}
+@keyframes pwChipRise {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes pwUnderline {
+  from { width: 0; }
+  to   { width: 100%; }
+}
+@keyframes pwStop {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.5); }
+}
+@keyframes pwDraw {
+  0%   { width: 0; margin-left: 0; }
+  45%  { width: 100%; margin-left: 0; }
+  100% { width: 0; margin-left: 100%; }
+}
+@keyframes pwSweep {
+  from { background-color: rgb(90 150 110 / 0.45); }
+  to   { background-color: rgb(90 150 110 / 0); }
+}
+@keyframes pwChipIn {
+  from { opacity: 0; transform: scale(0.8); }
+  to   { opacity: 1; transform: none; }
 }
 
 @layer base {
@@ -101,16 +217,21 @@
 
   body {
     @apply bg-canvas font-sans text-base text-ink antialiased;
-    font-feature-settings: "kern", "liga", "cv11";
+    font-feature-settings: "kern", "liga";
+  }
+
+  h1, h2, h3 {
+    @apply font-serif;
+    font-weight: 500;
   }
 
   ::selection {
-    @apply bg-brand-muted text-brand-strong;
+    @apply bg-accent-muted text-accent-strong;
   }
 
   /* One focus treatment for the whole site. */
   :focus-visible {
-    outline: 2px solid var(--color-brand);
+    outline: 2px solid var(--color-accent);
     outline-offset: 3px;
     border-radius: 6px;
   }
@@ -130,6 +251,11 @@
   .reveal[data-visible="true"] {
     opacity: 1;
     transform: none;
+  }
+
+  /* Mono section labels — the app's "machinery voice". */
+  .pw-label {
+    @apply font-mono text-[10px] tracking-[0.12em] text-ink-faint uppercase;
   }
 }
 

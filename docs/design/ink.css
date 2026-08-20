@@ -1,0 +1,110 @@
+/* Plainword Ink, light ("paper"). Tokens copied from Sources/PlainwordApp/DesignSystem.swift
+   and website/src/index.css — keep in sync. */
+:root {
+  --pw-canvas: #efe9dd;
+  --pw-surface: #fbf8f1;
+  --pw-raised: #f4efe4;
+  --pw-field: #f1ebde;
+  --pw-ink: #26211a;
+  --pw-ink-soft: #6f6759;
+  --pw-ink-faint: #9c937f;
+  --pw-line: #e3dccb;
+  --pw-line-strong: #d2c9b4;
+  --pw-accent: #33684c;
+  --pw-accent-strong: #27543d;
+  --pw-accent-muted: #e3ebe0;
+  --pw-accent-ink: #f7f4ea;
+  --pw-danger: #a6453e;
+  --pw-danger-muted: #f5e3de;
+  --serif: "Newsreader", ui-serif, Georgia, serif;
+  --sans: "Nunito Sans", -apple-system, Helvetica, Arial, sans-serif;
+  --mono: "Fragment Mono", ui-monospace, Menlo, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--pw-canvas);
+  color: var(--pw-ink);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* Shared: the ink-green edge the app marks its own surfaces with. */
+.edge::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 5px;
+  background: linear-gradient(90deg, var(--pw-accent) 0%, var(--pw-accent-strong) 52%, rgb(51 104 76 / 0.25) 100%);
+}
+
+.label {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pw-ink-faint);
+}
+
+/* Diff marks --------------------------------------------------------- */
+.r { background: var(--pw-danger-muted); color: var(--pw-danger); text-decoration: line-through; border-radius: 3px; padding: 0 2px; }
+.i { background: var(--pw-accent-muted); color: var(--pw-accent); font-weight: 500; border-radius: 3px; padding: 0 2px; }
+
+/* The floating correction panel -------------------------------------- */
+.tab {
+  margin-left: 34px;
+  width: 0; height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 7px solid var(--pw-surface);
+  filter: drop-shadow(0 -1px 0 var(--pw-line-strong));
+}
+.panel {
+  width: 352px;
+  background: var(--pw-surface);
+  border: 1px solid var(--pw-line-strong);
+  border-radius: 13px;
+  overflow: hidden;
+  box-shadow: 0 3px 8px rgb(72 56 28 / 0.08), 0 18px 44px rgb(72 56 28 / 0.16);
+}
+.panel header {
+  height: 42px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--pw-line);
+}
+.panel header img { width: 20px; height: 20px; border-radius: 5px; }
+.panel header b { font-family: var(--serif); font-size: 14.5px; font-weight: 500; }
+.panel header .detail { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--pw-ink-faint); }
+.panel .body { padding: 12px 13px 14px; }
+.panel .body .label { display: block; margin-bottom: 7px; }
+.panel footer {
+  height: 48px;
+  display: flex; align-items: center; gap: 7px;
+  padding: 0 12px;
+  border-top: 1px solid var(--pw-line);
+}
+.prose { font-family: var(--serif); font-size: 15px; line-height: 1.6; }
+
+.clip {
+  width: 24px; height: 24px;
+  border-radius: 6px;
+  background: var(--pw-accent-muted);
+  color: var(--pw-accent);
+  display: grid; place-items: center;
+}
+.btn {
+  height: 28px;
+  display: inline-flex; align-items: center; gap: 5px;
+  border-radius: 7px;
+  font-size: 12px; font-weight: 700;
+  padding: 0 11px;
+  border: 1px solid var(--pw-line-strong);
+  color: var(--pw-ink);
+}
+.btn.primary { background: var(--pw-accent); color: var(--pw-accent-ink); border-color: transparent; padding: 0 12px; }
+.btn.quiet { border-color: transparent; color: var(--pw-ink-soft); }
+.btn .hint { font-family: var(--mono); font-size: 10px; opacity: 0.7; }
+.spacer { flex: 1; }

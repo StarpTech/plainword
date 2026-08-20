@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=Nunito+Sans:opsz,wght@6..12,400..800&family=Fragment+Mono:ital@0;1&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#33684C;text-decoration:none}a:hover{color:#27543D}
+.pw{--c0:#EFE9DD;--s:#FBF8F1;--r:#F4EFE4;--fld:#F1EBDE;--ink:#26211A;--sec:#6F6759;--ter:#9C937F;--sep:#E3DCCB;--ssep:#D2C9B4;--acc:#33684C;--accS:#27543D;--accM:#E3EBE0;--accT:#F7F4EA;--dng:#A6453E;--dngM:#F5E3DE;--wrn:#96690F;--sh:0 18px 44px rgba(72,56,28,.16),0 3px 8px rgba(72,56,28,.08)}
+.pw[data-theme="dark"]{--c0:#191612;--s:#242019;--r:#2B261E;--fld:#1E1A14;--ink:#EFE8DA;--sec:#A79D8A;--ter:#7E7562;--sep:#383227;--ssep:#463E30;--acc:#8CBD9B;--accS:#A5CFB2;--accM:#2C3A2F;--accT:#161B15;--dng:#D08B80;--dngM:#3C2823;--wrn:#D9A84E;--sh:0 18px 44px rgba(0,0,0,.5),0 3px 8px rgba(0,0,0,.3)}
+@keyframes pwPulse{0%,100%{opacity:.25}50%{opacity:1}}
+@keyframes pwDraw{0%{width:0;margin-left:0}45%{width:100%;margin-left:0}100%{width:0;margin-left:100%}}
+</style>
+</helmet>
+<div class="pw" data-theme="{{ theme }}" data-screen-label="Design system reference" style="min-height:100vh;background:var(--c0);font-family:'Nunito Sans',sans-serif;color:var(--ink);transition:background .25s">
+  <div style="display:flex;align-items:center;gap:12px;padding:18px 32px 0 32px;max-width:1080px;margin:0 auto">
+    <img src="assets/pw-icon.png" alt="" style="width:26px;height:26px;border-radius:7px">
+    <div style="font-family:Newsreader,serif;font-size:19px;font-weight:500">Plainword <span style="color:var(--ter);font-style:italic">· design system</span></div>
+    <div style="flex:1"></div>
+    <nav style="display:flex;gap:18px;font-size:12.5px;font-weight:600;align-items:center">
+      <a href="Popover Simulator.dc.html" style="color:var(--sec)">Simulator</a>
+      <a href="Settings.dc.html" style="color:var(--sec)">Settings app</a>
+      <span style="color:var(--acc);border-bottom:1.5px solid var(--acc);padding-bottom:2px">Design system</span>
+      <button onClick="{{ toggleTheme }}" style="cursor:pointer;font-family:'Fragment Mono',monospace;font-size:10.5px;color:var(--sec);background:var(--s);border:1px solid var(--ssep);border-radius:7px;padding:5px 10px" style-hover="background:var(--r)">{{ themeLabel }}</button>
+    </nav>
+  </div>
+  <div style="max-width:1080px;margin:0 auto;padding:36px 32px 64px 32px;display:flex;flex-direction:column;gap:44px">
+    <div style="max-width:620px">
+      <h1 style="font-family:Newsreader,serif;font-size:38px;font-weight:500;line-height:1.15;margin:0 0 12px 0">Plainword Ink</h1>
+      <p style="font-size:14px;line-height:1.65;color:var(--sec);margin:0">A warm editorial system for a writing tool. Paper surfaces, a forest-ink accent, serif for anything that is writing, mono for anything that is machinery. Corrections read like an editor's marks: red pencil out, green ink in.</p>
+    </div>
+
+    <section style="display:flex;flex-direction:column;gap:14px">
+      <h2 style="font-family:'Fragment Mono',monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ter);font-weight:400;margin:0;border-bottom:1px solid var(--sep);padding-bottom:8px">01 · Color</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div style="background:#FBF8F1;border:1px solid #E3DCCB;border-radius:13px;padding:18px;color:#26211A">
+          <div style="font-family:Newsreader,serif;font-size:15px;margin-bottom:12px">Light — paper</div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+            <sc-for list="{{ lightSwatches }}" as="sw" hint-placeholder-count="8">
+              <div><div style="height:44px;border-radius:8px;background:{{ sw.hex }};border:1px solid #E3DCCB"></div><div style="font-family:'Fragment Mono',monospace;font-size:9px;color:#6F6759;margin-top:5px">{{ sw.name }}</div><div style="font-family:'Fragment Mono',monospace;font-size:9px;color:#9C937F">{{ sw.hex }}</div></div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="background:#242019;border:1px solid #383227;border-radius:13px;padding:18px;color:#EFE8DA">
+          <div style="font-family:Newsreader,serif;font-size:15px;margin-bottom:12px">Dark — lamplight</div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+            <sc-for list="{{ darkSwatches }}" as="sw" hint-placeholder-count="8">
+              <div><div style="height:44px;border-radius:8px;background:{{ sw.hex }};border:1px solid #383227"></div><div style="font-family:'Fragment Mono',monospace;font-size:9px;color:#A79D8A;margin-top:5px">{{ sw.name }}</div><div style="font-family:'Fragment Mono',monospace;font-size:9px;color:#7E7562">{{ sw.hex }}</div></div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section style="display:flex;flex-direction:column;gap:14px">
+      <h2 style="font-family:'Fragment Mono',monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ter);font-weight:400;margin:0;border-bottom:1px solid var(--sep);padding-bottom:8px">02 · Type</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+        <div style="background:var(--s);border:1px solid var(--sep);border-radius:13px;padding:20px">
+          <div style="font-family:Newsreader,serif;font-size:30px;line-height:1.2">Newsreader</div>
+          <div style="font-family:Newsreader,serif;font-style:italic;font-size:15px;color:var(--sec);margin:6px 0 10px 0">The writing voice</div>
+          <div style="font-size:11.5px;line-height:1.6;color:var(--sec)">Panel titles, suggestion text, page headings — anywhere the content is prose. 14.5–26 px, weight 400–500.</div>
+        </div>
+        <div style="background:var(--s);border:1px solid var(--sep);border-radius:13px;padding:20px">
+          <div style="font-size:27px;font-weight:700;line-height:1.25">Nunito Sans</div>
+          <div style="font-size:14px;color:var(--sec);margin:6px 0 10px 0">The interface voice</div>
+          <div style="font-size:11.5px;line-height:1.6;color:var(--sec)">Buttons, rows, controls, descriptions. 11–13 px, weight 600–700 for labels, 400 for detail text.</div>
+        </div>
+        <div style="background:var(--s);border:1px solid var(--sep);border-radius:13px;padding:20px">
+          <div style="font-family:'Fragment Mono',monospace;font-size:22px;line-height:1.3">Fragment Mono</div>
+          <div style="font-family:'Fragment Mono',monospace;font-size:12px;color:var(--sec);margin:6px 0 10px 0">The machinery voice</div>
+          <div style="font-size:11.5px;line-height:1.6;color:var(--sec)">Shortcuts, section labels, receipts, log lines, token names. 9.5–11 px, uppercase with .08–.12 em tracking for labels.</div>
+        </div>
+      </div>
+    </section>
+
+    <section style="display:flex;flex-direction:column;gap:14px">
+      <h2 style="font-family:'Fragment Mono',monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ter);font-weight:400;margin:0;border-bottom:1px solid var(--sep);padding-bottom:8px">03 · Controls</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div style="background:var(--s);border:1px solid var(--sep);border-radius:13px;padding:20px;display:flex;flex-direction:column;gap:14px">
+          <div style="font-family:'Fragment Mono',monospace;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ter)">Buttons</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <button style="cursor:pointer;font-family:'Nunito Sans',sans-serif;font-size:12px;font-weight:700;color:var(--accT);background:var(--acc);border:none;border-radius:8px;height:28px;padding:0 12px" style-hover="background:var(--accS)">Apply fix <span style="font-family:'Fragment Mono',monospace;font-size:10px;opacity:.7">⌘↩</span></button>
+            <button style="cursor:pointer;font-family:'Nunito Sans',sans-serif;font-size:12px;font-weight:700;color:var(--ink);background:none;border:1px solid var(--ssep);border-radius:8px;height:28px;padding:0 11px" style-hover="background:var(--r)">Dismiss <span style="font-family:'Fragment Mono',monospace;font-size:10px;opacity:.55">esc</span></button>
+            <button style="cursor:pointer;font-family:'Nunito Sans',sans-serif;font-size:12px;font-weight:700;color:var(--sec);background:none;border:none;border-radius:8px;height:28px;padding:0 9px" style-hover="background:var(--r);color:var(--ink)">Quiet</button>
+            <button style="cursor:pointer;font-family:'Nunito Sans',sans-serif;font-size:12px;font-weight:700;color:var(--dng);background:none;border:none;border-radius:8px;height:28px;padding:0 9px" style-hover="background:var(--dngM)">Remove</button>
+            <button disabled="{{ true }}" style="font-family:'Nunito Sans',sans-serif;font-size:12px;font-weight:700;color:var(--ter);background:var(--fld);border:none;border-radius:8px;height:28px;padding:0 12px">Disabled</button>
+          </div>
+          <div style="font-family:'Fragment Mono',monospace;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ter)">Pills</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--acc);background:var(--accM);border-radius:7px;padding:5px 10px"><span style="width:6px;height:6px;border-radius:50%;background:var(--acc)"></span>Listening</span>
+            <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--wrn);background:var(--fld);border-radius:7px;padding:5px 10px"><span style="width:6px;height:6px;border-radius:50%;background:var(--wrn)"></span>Not configured</span>
+            <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--ter);background:var(--fld);border-radius:7px;padding:5px 10px"><span style="width:6px;height:6px;border-radius:50%;background:var(--ter)"></span>Paused</span>
+            <span style="font-family:'Fragment Mono',monospace;font-size:11px;background:var(--fld);border:1px solid var(--ssep);border-radius:7px;padding:5px 10px">⌘F2</span>
+          </div>
+          <div style="font-family:'Fragment Mono',monospace;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ter)">Segmented + switch</div>
+          <div style="display:flex;gap:14px;align-items:center">
+            <span style="display:flex;background:var(--fld);border:1px solid var(--sep);border-radius:8px;padding:2px;gap:2px">
+              <button style="cursor:pointer;font-size:11px;font-weight:700;border:none;border-radius:6px;padding:4.5px 11px;background:var(--s);color:var(--ink)">Changes</button>
+              <button style="cursor:pointer;font-size:11px;font-weight:700;border:none;border-radius:6px;padding:4.5px 11px;background:transparent;color:var(--ter)">Revised</button>
+            </span>
+            <span style="display:inline-flex;width:34px;height:20px;border-radius:10px;padding:2px;background:var(--acc);justify-content:flex-end;box-sizing:border-box"><span style="width:16px;height:16px;border-radius:50%;background:var(--s);box-shadow:0 1px 2px rgba(0,0,0,.25)"></span></span>
+            <span style="display:inline-flex;width:34px;height:20px;border-radius:10px;padding:2px;background:var(--ssep);box-sizing:border-box"><span style="width:16px;height:16px;border-radius:50%;background:var(--s);box-shadow:0 1px 2px rgba(0,0,0,.25)"></span></span>
+          </div>
+        </div>
+        <div style="background:var(--s);border:1px solid var(--sep);border-radius:13px;padding:20px;display:flex;flex-direction:column;gap:14px">
+          <div style="font-family:'Fragment Mono',monospace;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ter)">Editor's marks — the diff</div>
+          <div style="font-family:Newsreader,serif;font-size:16px;line-height:1.7">I <span style="color:var(--dng);background:var(--dngM);text-decoration:line-through;text-decoration-color:var(--dng);border-radius:3px;padding:0 2px">beleive</span> <span style="color:var(--acc);background:var(--accM);border-radius:3px;padding:0 2px;font-weight:500">believe</span> the report is finished, and I will send it <span style="color:var(--dng);background:var(--dngM);text-decoration:line-through;text-decoration-color:var(--dng);border-radius:3px;padding:0 2px">tomorow</span> <span style="color:var(--acc);background:var(--accM);border-radius:3px;padding:0 2px;font-weight:500">tomorrow</span> morning.</div>
+          <div style="font-size:11px;line-height:1.6;color:var(--sec)">Removals strike through in red pencil; insertions sit on green ink. Both keep a 3 px radius wash so marks read as annotation, not error.</div>
+          <div style="font-family:'Fragment Mono',monospace;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ter)">Working state</div>
+          <div>
+            <span style="display:inline-block">
+              <span style="font-family:Newsreader,serif;font-style:italic;font-size:14px;color:var(--sec)">Reading it over…</span>
+              <span style="display:block;height:2px;background:var(--acc);border-radius:2px;animation:pwDraw 1.3s ease-in-out infinite;margin-top:3px"></span>
+            </span>
+            <span style="font-family:Newsreader,serif;font-size:14px;margin-left:24px">streaming<span style="color:var(--acc);animation:pwPulse 1.1s ease-in-out infinite"> ▍</span></span>
+          </div>
+          <div style="font-size:11px;line-height:1.6;color:var(--sec)">Thinking is an ink line drawing itself under an italic aside. Streaming text fades its last five characters up behind a pulsing caret. Every content change rises 4 px over 180 ms.</div>
+        </div>
+      </div>
+    </section>
+
+    <section style="display:flex;flex-direction:column;gap:14px">
+      <h2 style="font-family:'Fragment Mono',monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ter);font-weight:400;margin:0;border-bottom:1px solid var(--sep);padding-bottom:8px">04 · Menu bar item</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+        <div style="background:var(--s);border:1px solid var(--sep);border-radius:13px;padding:20px;display:flex;flex-direction:column;gap:14px">
+          <div style="font-family:'Fragment Mono',monospace;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ter)">In the menu bar</div>
+          <div style="background:#1E1B16;border-radius:8px;padding:0 14px;height:30px;display:flex;align-items:center;justify-content:flex-end;gap:16px;color:#D8D2C6;font-size:12px">
+            <span style="font-family:Newsreader,serif;font-size:15px;font-weight:500;letter-spacing:.01em">p<span style="color:#8CBD9B">.</span></span>
+            <span style="opacity:.7">◐</span><span style="opacity:.7">⌥</span><span style="opacity:.8">Wed 14:32</span>
+          </div>
+          <div style="font-size:11px;line-height:1.6;color:var(--sec)">A lowercase serif "p" with a green ink full stop — a template glyph at 15 pt. The stop turns amber while a request is in flight and disappears when suggestions are paused.</div>
+          <div style="display:flex;gap:16px;align-items:center">
+            <span style="font-family:Newsreader,serif;font-size:22px">p<span style="color:var(--acc)">.</span></span>
+            <span style="font-family:Newsreader,serif;font-size:22px">p<span style="color:var(--wrn);animation:pwPulse 1.2s ease-in-out infinite">.</span></span>
+            <span style="font-family:Newsreader,serif;font-size:22px;color:var(--ter)">p</span>
+            <span style="font-family:'Fragment Mono',monospace;font-size:9.5px;color:var(--ter)">idle · working · paused</span>
+          </div>
+        </div>
+        <div style="background:var(--s);border:1px solid var(--sep);border-radius:13px;padding:20px;display:flex;gap:20px">
+          <div style="width:230px;background:var(--r);border:1px solid var(--ssep);border-radius:11px;box-shadow:var(--sh);padding:6px;display:flex;flex-direction:column;gap:1px;font-size:12.5px">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border-radius:7px" style-hover="background:var(--fld)"><span style="font-weight:700">Suggestions</span><span style="display:inline-flex;width:30px;height:18px;border-radius:9px;padding:2px;background:var(--acc);justify-content:flex-end;box-sizing:border-box"><span style="width:14px;height:14px;border-radius:50%;background:var(--s)"></span></span></div>
+            <div style="display:flex;justify-content:space-between;padding:7px 10px;border-radius:7px;color:var(--sec)" style-hover="background:var(--fld);color:var(--ink)"><span>Ignore Mail</span></div>
+            <div style="height:1px;background:var(--ssep);margin:4px 6px"></div>
+            <div style="display:flex;justify-content:space-between;padding:7px 10px;border-radius:7px" style-hover="background:var(--fld)"><span>Review text</span><span style="font-family:'Fragment Mono',monospace;font-size:10px;color:var(--ter)">⌘F2</span></div>
+            <div style="display:flex;justify-content:space-between;padding:7px 10px;border-radius:7px" style-hover="background:var(--fld)"><span>Transform…</span><span style="font-family:'Fragment Mono',monospace;font-size:10px;color:var(--ter)">⇧⌘F2</span></div>
+            <div style="height:1px;background:var(--ssep);margin:4px 6px"></div>
+            <div style="display:flex;justify-content:space-between;padding:7px 10px;border-radius:7px" style-hover="background:var(--fld)"><span>Settings…</span><span style="font-family:'Fragment Mono',monospace;font-size:10px;color:var(--ter)">⌘,</span></div>
+            <div style="padding:7px 10px;border-radius:7px;color:var(--sec)" style-hover="background:var(--fld);color:var(--ink)">Quit Plainword</div>
+          </div>
+          <div style="font-size:11px;line-height:1.6;color:var(--sec);flex:1">The dropdown keeps the paper card language: raised surface, hairline border, mono shortcuts on the right. The last provider status sits nowhere in it — status lives in the glyph itself.</div>
+        </div>
+      </div>
+    </section>
+
+    <section style="display:flex;flex-direction:column;gap:14px">
+      <h2 style="font-family:'Fragment Mono',monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ter);font-weight:400;margin:0;border-bottom:1px solid var(--sep);padding-bottom:8px">05 · Rules of motion</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+        <div style="background:var(--s);border:1px solid var(--sep);border-radius:13px;padding:18px"><div style="font-family:'Fragment Mono',monospace;font-size:11px;color:var(--acc);margin-bottom:8px">180 ms</div><div style="font-size:11.5px;line-height:1.6;color:var(--sec)">One duration for everything the user watches: content swaps, panel resizes, receipt expansion. Ease-out, 4 px rise.</div></div>
+        <div style="background:var(--s);border:1px solid var(--sep);border-radius:13px;padding:18px"><div style="font-family:'Fragment Mono',monospace;font-size:11px;color:var(--acc);margin-bottom:8px">arrive · settle</div><div style="font-size:11.5px;line-height:1.6;color:var(--sec)">Streamed text is never torn down when it finishes — the same words gain their controls in place. Applying sweeps green ink across the field, then everything gets out of the way.</div></div>
+        <div style="background:var(--s);border:1px solid var(--sep);border-radius:13px;padding:18px"><div style="font-family:'Fragment Mono',monospace;font-size:11px;color:var(--acc);margin-bottom:8px">reduce motion</div><div style="font-size:11.5px;line-height:1.6;color:var(--sec)">Every animation here is decoration. With Reduce Motion on, text appears whole, the caret holds steady, and panels cut rather than glide.</div></div>
+      </div>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1160,&quot;height&quot;:900},&quot;appearance&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;light&quot;,&quot;dark&quot;],&quot;default&quot;:&quot;light&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Theme&quot;}}">
+class Component extends DCLogic {
+  state = { themeOverride:null };
+  renderVals() {
+    const theme = this.state.themeOverride ?? this.props.appearance ?? "light";
+    const mk = (a) => a.map(([name, hex]) => ({ name, hex }));
+    return {
+      theme, themeLabel: theme === "dark" ? "◐ light" : "◑ dark",
+      toggleTheme: () => this.setState({ themeOverride: theme === "dark" ? "light" : "dark" }),
+      lightSwatches: mk([["canvas","#EFE9DD"],["surface","#FBF8F1"],["raised","#F4EFE4"],["field","#F1EBDE"],["ink","#26211A"],["accent","#33684C"],["danger","#A6453E"],["warning","#96690F"]]),
+      darkSwatches: mk([["canvas","#191612"],["surface","#242019"],["raised","#2B261E"],["field","#1E1A14"],["ink","#EFE8DA"],["accent","#8CBD9B"],["danger","#D08B80"],["warning","#D9A84E"]])
+    };
+  }
+}
+</script>
+</body>
+</html>

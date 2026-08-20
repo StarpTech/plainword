@@ -1,7 +1,6 @@
 import AppKit
 import PlainwordCore
 import SwiftUI
-import os
 
 enum SuggestionPresentationMode: Equatable {
     case sourceOverlay
@@ -12,6 +11,12 @@ private enum CorrectionPresentationMetrics {
     static let maximumChipCount = 6
     static let chipSpacing: CGFloat = 7
     static let previewHeaderHeight: CGFloat = 22
+    static let headerHeight: CGFloat = 42
+    static let footerHeight: CGFloat = 48
+    static let triggerSize = CGSize(width: 48, height: 48)
+    static let appliedSize = CGSize(width: 104, height: 34)
+    /// How long the applied chip stays before the panel gets out of the way.
+    static let appliedDuration: Duration = .milliseconds(1900)
 }
 
 /// Geometry of the expanded context receipt.
@@ -39,7 +44,7 @@ private enum ContextReceiptMetrics {
     }
 }
 
-private enum SuggestionPreviewMode: Equatable {
+private enum SuggestionPreviewMode: Hashable {
     case revised
     case changes
 }
@@ -184,6 +189,7 @@ private final class CorrectionPanelModel: ObservableObject {
         var contextApplicationName = ""
         var isContextSendingEnabled = false
         var contextWasSentWithSuggestion = false
+        var canRetry = false
     }
 
     enum Phase: Equatable {
@@ -195,6 +201,8 @@ private final class CorrectionPanelModel: ObservableObject {
         case ready
         case unchanged
         case failure(String)
+        /// The edit landed. Nothing is being proposed any more — this is a receipt.
+        case applied
     }
 
     @Published private var state = State()
@@ -234,6 +242,8 @@ private final class CorrectionPanelModel: ObservableObject {
         state.showsPromptBackButton || state.showsSuggestionBackButton
     }
     var isWorking: Bool { phase == .processing || phase == .streaming }
+    /// Whether the failure on screen is one the panel can offer to run again.
+    var canRetry: Bool { state.canRetry }
     var canSubmitPrompt: Bool {
         !promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -321,11 +331,12 @@ private final class CorrectionPanelModel: ObservableObject {
             isContextReceiptExpanded: state.isContextReceiptExpanded,
             contextApplicationName: state.contextApplicationName,
             isContextSendingEnabled: state.isContextSendingEnabled,
-            contextWasSentWithSuggestion: state.contextWasSentWithSuggestion
+            contextWasSentWithSuggestion: state.contextWasSentWithSuggestion,
+            canRetry: state.canRetry
         )
         let changes = { self.state = nextState }
-        if animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            withAnimation(.smooth(duration: 0.18), changes)
+        if animated, !PlainwordMotion.reducesMotion {
+            withAnimation(PlainwordMotion.content, changes)
         } else {
             changes()
         }
@@ -347,21 +358,25 @@ private final class CorrectionPanelModel: ObservableObject {
     func setContextSendingEnabled(_ isEnabled: Bool) {
         guard state.isContextSendingEnabled != isEnabled else { return }
         let changes = { self.state.isContextSendingEnabled = isEnabled }
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+        if PlainwordMotion.reducesMotion {
             changes()
         } else {
-            withAnimation(.smooth(duration: 0.18), changes)
+            withAnimation(PlainwordMotion.content, changes)
         }
     }
 
     func setContextReceiptExpanded(_ isExpanded: Bool) {
         guard state.isContextReceiptExpanded != isExpanded else { return }
         let changes = { self.state.isContextReceiptExpanded = isExpanded }
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+        if PlainwordMotion.reducesMotion {
             changes()
         } else {
-            withAnimation(.smooth(duration: 0.18), changes)
+            withAnimation(PlainwordMotion.content, changes)
         }
+    }
+
+    func setCanRetry(_ canRetry: Bool) {
+        state.canRetry = canRetry
     }
 
     func setPresentation(_ presentation: SuggestionPresentationMode) {
@@ -371,7 +386,12 @@ private final class CorrectionPanelModel: ObservableObject {
 
     func setPreviewMode(_ previewMode: SuggestionPreviewMode) {
         guard state.previewMode != previewMode else { return }
-        state.previewMode = previewMode
+        let changes = { self.state.previewMode = previewMode }
+        if PlainwordMotion.reducesMotion {
+            changes()
+        } else {
+            withAnimation(PlainwordMotion.content, changes)
+        }
     }
 
     func setPointerEdge(_ pointerEdge: ProposalPointerEdge) {
@@ -392,6 +412,7 @@ private final class CorrectionPanelModel: ObservableObject {
         case .streaming, .ready: 3
         case .unchanged: 4
         case .failure: 5
+        case .applied: 6
         }
     }
 }
@@ -412,8 +433,8 @@ final class CorrectionPanelController {
 
     private let model = CorrectionPanelModel()
     private let panel: CorrectionPanel
-    private let compactPanelWidth: CGFloat = 286
-    private let regularPanelWidth: CGFloat = 360
+    private let compactPanelWidth: CGFloat = 300
+    private let regularPanelWidth: CGFloat = 352
     private let maximumPanelWidth: CGFloat = 560
     private let maximumPanelHeight: CGFloat = 520
     private let pointerHeight: CGFloat = 7
@@ -425,10 +446,12 @@ final class CorrectionPanelController {
     private var onBack: (() -> Void)?
     private var onRequestPrompt: (() -> Void)?
     private var onSubmitPrompt: ((String) -> Void)?
+    private var onRetry: (() -> Void)?
     private var onSetContextSendingEnabled: ((Bool) -> Void)?
     private var targetFrame: NSRect?
     private var userPositionedOrigin: NSPoint?
     private var streamingResizeTask: Task<Void, Never>?
+    private var appliedDismissTask: Task<Void, Never>?
     private var visibilityGeneration = 0
 
     var windowNumber: Int { panel.windowNumber }
@@ -446,6 +469,7 @@ final class CorrectionPanelController {
                     onSubmitPrompt: { [weak self] prompt in
                         self?.onSubmitPrompt?(prompt)
                     },
+                    onRetry: { [weak self] in self?.onRetry?() },
                     onPreviewModeChange: { [weak self] previewMode in
                         self?.updatePreviewMode(previewMode)
                     },
@@ -543,16 +567,15 @@ final class CorrectionPanelController {
         // same result gaining its controls, so it is adopted rather than replaced.
         if model.phase == .streaming {
             model.adopt(
-                showsPromptButton: suggestion.kind != .composition,
+                showsPromptButton: true,
                 showsBackButton: onBack != nil
             )
         } else {
             model.begin(
                 pointerEdge: verticalPlacement.pointerEdge,
-                // A draft is not in the field yet, so there is nothing there to
-                // transform. Once it is inserted the ordinary transform shortcut
-                // reaches it.
-                showsPromptButton: suggestion.kind != .composition,
+                // Every result can be sent back for another pass, a draft included:
+                // the prompt works on the text being proposed, not on the field.
+                showsPromptButton: true,
                 showsBackButton: onBack != nil
             )
         }
@@ -767,8 +790,10 @@ final class CorrectionPanelController {
         resizeForContent(animated: true)
     }
 
-    func showFailure(_ message: String) {
+    func showFailure(_ message: String, onRetry: (() -> Void)? = nil) {
         cancelScheduledStreamingResize()
+        self.onRetry = onRetry
+        model.setCanRetry(onRetry != nil)
         model.transition(to: .failure(message))
         configurePlacement(near: anchor)
         model.setPointerEdge(verticalPlacement.pointerEdge)
@@ -776,8 +801,39 @@ final class CorrectionPanelController {
         resizeForContent(animated: true)
     }
 
+    /// Replaces the panel with a receipt, then gets out of the way.
+    ///
+    /// The edit is already in the field; leaving the proposal up long enough to read
+    /// "Applied" is the whole point, and leaving it up any longer is in the way.
+    func showApplied() {
+        cancelScheduledStreamingResize()
+        appliedDismissTask?.cancel()
+        onAccept = nil
+        onBack = nil
+        onRequestPrompt = nil
+        onSubmitPrompt = nil
+        onRetry = nil
+        userPositionedOrigin = nil
+        guard panel.isVisible else {
+            dismiss()
+            return
+        }
+
+        model.transition(to: .applied, correctedText: "")
+        targetFrame = nil
+        resizeForContent(animated: true)
+        appliedDismissTask = Task { [weak self] in
+            try? await Task.sleep(for: CorrectionPresentationMetrics.appliedDuration)
+            guard !Task.isCancelled else { return }
+            self?.dismiss()
+        }
+    }
+
     func dismiss() {
         cancelScheduledStreamingResize()
+        appliedDismissTask?.cancel()
+        appliedDismissTask = nil
+        onRetry = nil
         onAccept = nil
         onDismiss = nil
         onBack = nil
@@ -848,7 +904,11 @@ final class CorrectionPanelController {
            panel.isVisible,
            !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.18
+                context.duration = PlainwordMotion.duration
+                // AppKit eases in and out by default. The content inside eases out,
+                // and two curves over the same 180 ms read as the panel and its
+                // contents coming apart.
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 context.allowsImplicitAnimation = true
                 panel.animator().setFrame(frame, display: true)
             }
@@ -969,33 +1029,48 @@ final class CorrectionPanelController {
     private var targetLayout: PanelLayout {
         if model.phase == .promptTrigger || model.phase == .promptTriggerLoading {
             return PanelLayout(
-                size: NSSize(width: 48, height: 49),
+                size: CorrectionPresentationMetrics.triggerSize,
+                contentRequiresScrolling: false
+            )
+        }
+        if model.phase == .applied {
+            return PanelLayout(
+                size: CorrectionPresentationMetrics.appliedSize,
                 contentRequiresScrolling: false
             )
         }
 
         let contentHeight: CGFloat
+        var showsFooter = true
         switch model.phase {
-        case .promptTrigger, .promptTriggerLoading:
+        case .promptTrigger, .promptTriggerLoading, .applied:
             contentHeight = 0
+            showsFooter = false
         case .prompting:
             // Composing drops the transform shortcuts, and with them their row.
-            contentHeight = model.isComposing ? 86 : 108
-        case .processing, .unchanged:
-            contentHeight = 40
+            contentHeight = model.isComposing ? 82 : 114
+        case .processing:
+            // The italic aside plus the ink line drawing itself under it.
+            contentHeight = 52
+        case .unchanged:
+            contentHeight = 46
+            showsFooter = false
         case .streaming:
-            contentHeight = 26 + measuredTextHeight(model.correctedText)
+            contentHeight = Self.labelledContentInset
+                + measuredTextHeight(model.correctedText, lineSpacing: 4)
         case .failure(let message):
-            contentHeight = 18 + measuredTextHeight(message, maximum: 72)
+            contentHeight = 26 + measuredTextHeight(
+                message,
+                maximum: 76,
+                font: .systemFont(ofSize: 12.5),
+                lineSpacing: 2
+            )
         case .ready:
             contentHeight = readyContentHeight
         }
 
-        let footerHeight: CGFloat = model.phase == .prompting
-            || model.phase == .processing
-            || model.phase == .streaming
-            || model.phase == .ready ? 53 : 0
-        let naturalHeight = pointerHeight + 43 + 1
+        let footerHeight = showsFooter ? CorrectionPresentationMetrics.footerHeight : 0
+        let naturalHeight = pointerHeight + CorrectionPresentationMetrics.headerHeight + 1
             + contentHeight
             + contextReceiptHeight
             + footerHeight
@@ -1032,6 +1107,12 @@ final class CorrectionPanelController {
         return max(160, min(screenHeight, anchorHeight))
     }
 
+    /// The writing voice, which every measured suggestion is set in.
+    private static let suggestionFont = PlainwordFont.serifNSFont(15)
+    private static let suggestionLineSpacing: CGFloat = 4
+    /// Padding, the mono section label, and the gap under it.
+    private static let labelledContentInset: CGFloat = 48
+
     private var readyContentHeight: CGFloat {
         guard let suggestion = model.suggestion else { return 70 }
         switch suggestion.kind {
@@ -1041,17 +1122,18 @@ final class CorrectionPanelController {
             }
             return fallbackPreviewContentHeight(for: suggestion)
         case .completion:
-            return 46 + measuredTextHeight(
+            return Self.labelledContentInset + measuredTextHeight(
                 suggestion.changes.first?.replacement ?? suggestion.replacementText,
-                font: .systemFont(ofSize: 14, weight: .medium),
-                lineSpacing: 2
+                font: Self.suggestionFont,
+                lineSpacing: Self.suggestionLineSpacing
             )
         case .rewrite:
             return fallbackPreviewContentHeight(for: suggestion)
         case .composition:
-            return 46 + measuredTextHeight(
+            return Self.labelledContentInset + measuredTextHeight(
                 suggestion.replacementText,
-                lineSpacing: 2
+                font: Self.suggestionFont,
+                lineSpacing: Self.suggestionLineSpacing
             )
         }
     }
@@ -1059,20 +1141,56 @@ final class CorrectionPanelController {
     private func fallbackPreviewContentHeight(
         for suggestion: WritingSuggestion
     ) -> CGFloat {
-        let text: String
+        let textHeight: CGFloat
         switch model.previewMode {
         case .revised:
-            text = suggestion.replacementText
+            textHeight = measuredTextHeight(
+                suggestion.replacementText,
+                font: Self.suggestionFont,
+                lineSpacing: Self.suggestionLineSpacing
+            )
         case .changes:
-            text = WritingDiffPlanner.make(
-                original: suggestion.originalText,
-                replacement: suggestion.replacementText
-            ).map(\.text).joined()
+            textHeight = measuredDiffHeight(for: suggestion)
         }
         return 26
             + CorrectionPresentationMetrics.previewHeaderHeight
-            + 8
-            + measuredTextHeight(text, lineSpacing: 2)
+            + 7
+            + textHeight
+    }
+
+    /// Measured with the weights the diff is actually drawn in.
+    ///
+    /// Insertions are set a step heavier, so measuring the whole diff as one regular
+    /// run can lose a line at a wrap boundary — and a panel one line short both clips
+    /// the suggestion and flips the scroll view on as the mode is toggled.
+    private func measuredDiffHeight(for suggestion: WritingSuggestion) -> CGFloat {
+        let insertedFont = PlainwordFont.serifNSFont(15, weight: .medium)
+        let attributed = NSMutableAttributedString()
+        for segment in WritingDiffPlanner.make(
+            original: suggestion.originalText,
+            replacement: suggestion.replacementText
+        ) {
+            let font: NSFont
+            switch segment.kind {
+            case .inserted: font = insertedFont
+            case .unchanged, .removed: font = Self.suggestionFont
+            }
+            attributed.append(
+                NSAttributedString(string: segment.text, attributes: [.font: font])
+            )
+        }
+        guard attributed.length > 0 else { return 20 }
+
+        let bounds = attributed.boundingRect(
+            with: NSSize(width: max(panelWidth - 28, 1), height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        let lineHeight = max(ceil(Self.suggestionFont.boundingRectForFont.height), 1)
+        let lineCount = max(ceil(bounds.height / lineHeight), 1)
+        return max(
+            ceil(bounds.height) + CGFloat(lineCount - 1) * Self.suggestionLineSpacing,
+            20
+        )
     }
 
     private func inlineCorrectionContentHeight(
@@ -1080,14 +1198,14 @@ final class CorrectionPanelController {
     ) -> CGFloat {
         let phrases = replacementPhrases(for: suggestion)
         if phrases.count > CorrectionPresentationMetrics.maximumChipCount {
-            return 46 + measuredTextHeight(
+            return Self.labelledContentInset + measuredTextHeight(
                 suggestion.replacementText,
-                font: .systemFont(ofSize: 14, weight: .medium),
-                lineSpacing: 2
+                font: Self.suggestionFont,
+                lineSpacing: Self.suggestionLineSpacing
             )
         }
 
-        let font = NSFont.systemFont(ofSize: 14, weight: .semibold)
+        let font = PlainwordFont.serifNSFont(15, weight: .medium)
         let availableWidth = max(panelWidth - 26, 1)
         let chipSizes = phrases.map { phrase -> CGSize in
             let naturalWidth = ceil(NSString(string: phrase).boundingRect(
@@ -1124,8 +1242,8 @@ final class CorrectionPanelController {
         }
         chipsHeight += rowHeight
 
-        // 26 points of outer padding, a 12-point label, and the 8-point label gap.
-        return 46 + chipsHeight
+        // Outer padding, the mono label, and the gap under it.
+        return Self.labelledContentInset + chipsHeight
     }
 
     private var panelWidth: CGFloat {
@@ -1154,7 +1272,7 @@ final class CorrectionPanelController {
         let measuredWidth = NSString(string: text).boundingRect(
             with: NSSize(width: CGFloat.greatestFiniteMagnitude, height: 24),
             options: [.usesFontLeading],
-            attributes: [.font: NSFont.systemFont(ofSize: 14, weight: .medium)]
+            attributes: [.font: Self.suggestionFont]
         ).width
         let preferredWidth = min(
             maximumPanelWidth,
@@ -1163,18 +1281,10 @@ final class CorrectionPanelController {
         return min(preferredWidth, availableWidth)
     }
 
-    private func measuredDiffHeight(_ suggestion: WritingSuggestion) -> CGFloat {
-        let text = WritingDiffPlanner.make(
-            original: suggestion.originalText,
-            replacement: suggestion.replacementText
-        ).map(\.text).joined()
-        return measuredTextHeight(text, lineSpacing: 2)
-    }
-
     private func measuredTextHeight(
         _ text: String,
         maximum: CGFloat = .greatestFiniteMagnitude,
-        font: NSFont = .systemFont(ofSize: 13),
+        font: NSFont = PlainwordFont.serifNSFont(15),
         width: CGFloat? = nil,
         lineSpacing: CGFloat = 0
     ) -> CGFloat {
@@ -1321,17 +1431,24 @@ private struct StreamingTextView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var revealedCount = 0
     @State private var caretPhase: Double = 0
+    @State private var revealAccumulator: Double = 0
     @State private var pacing = Pacing()
-    @State private var revealFrames = 0
 
     /// How many characters at the end are still fading up.
     private static let fadeLength = 5
+    /// The reveal keeps its own 55 ms cadence, a ninth of what is left each time.
+    /// The ticker runs faster than that because the caret has to pulse smoothly.
+    private static let revealInterval: Double = 0.055
+    private static let revealDivisor: Double = 9
     private static let frameInterval: Double = 1.0 / 30
     private static let caretPeriod: Double = 1.1
+    /// The caret breathes between these, never all the way out.
+    private static let caretMinimumOpacity: Double = 0.25
 
     var body: some View {
         rendered
-            .font(.system(size: 13))
+            .font(PlainwordFont.serif(15))
+            .lineSpacing(4)
             .frame(maxWidth: .infinity, alignment: .leading)
             .onChange(
                 of: Pacing(
@@ -1376,79 +1493,121 @@ private struct StreamingTextView: View {
     }
 
     private var caret: Text {
+        // Dimmest as the cycle turns over and brightest halfway through it, easing
+        // between the two — a raised cosine, which is what the cadence asks for.
         let pulse = reduceMotion
             ? 1
-            : 0.3 + 0.7 * (0.5 + 0.5 * cos(caretPhase * 2 * .pi / Self.caretPeriod))
+            : Self.caretMinimumOpacity
+                + (1 - Self.caretMinimumOpacity)
+                * (0.5 - 0.5 * cos(caretPhase * 2 * .pi / Self.caretPeriod))
         return Text(" \u{258D}")
             .foregroundStyle(PlainwordTheme.accent.opacity(pulse))
     }
 
     private func advance() {
         let pacing = self.pacing
+        // Nothing is drawing itself in, so nothing needs redrawing.
         guard pacing.isRevealing else { return }
-        // TEMPORARY reveal diagnostics.
-        if revealedCount < pacing.targetCount {
-            revealFrames += 1
-        } else if revealFrames > 0 {
-            os_log(
-                "reveal caught up: %{public}d chars in %{public}d frames",
-                revealedCount,
-                revealFrames
-            )
-            revealFrames = 0
-        }
-        if revealedCount < pacing.targetCount {
-            // A sixth of what is left each frame: quick when a large burst lands, and
-            // gentle over the last few characters.
-            revealedCount += max(1, (pacing.targetCount - revealedCount) / 6)
-        }
+
         caretPhase = (caretPhase + Self.frameInterval)
             .truncatingRemainder(dividingBy: Self.caretPeriod)
+
+        revealAccumulator += Self.frameInterval
+        guard revealAccumulator >= Self.revealInterval else { return }
+        revealAccumulator -= Self.revealInterval
+        guard revealedCount < pacing.targetCount else { return }
+
+        // A ninth of what is left, rounded up: quick when a large burst lands, and
+        // one character at a time over the last few.
+        let remaining = Double(pacing.targetCount - revealedCount)
+        revealedCount += max(1, Int((remaining / Self.revealDivisor).rounded(.up)))
     }
 }
 
-private struct PlainwordLoadingMark: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isAnimating = false
+/// An ink line drawing itself under an aside.
+///
+/// Thinking is not a spinner here. The line sweeps in from the left, then leaves the
+/// same way, which reads as a hand working rather than as a machine waiting.
+private struct DrawingUnderline: View {
+    var thickness: CGFloat = 2
+    /// Draws once and stays, rather than looping — for marks that announce rather
+    /// than persist.
+    var drawsOnce = false
+    var period: Double = 1.3
+    var delay: Double = 0
 
-    var size: CGFloat = 22
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        PlainwordBrandMark(size: size)
-            .scaleEffect(reduceMotion ? 1 : (isAnimating ? 1 : 0.92))
-            .shadow(
-                color: PlainwordTheme.accent.opacity(isAnimating ? 0.55 : 0.2),
-                radius: isAnimating ? size * 0.28 : size * 0.12
-            )
-            .animation(
-                reduceMotion
-                    ? nil
-                    : .easeInOut(duration: 0.82).repeatForever(autoreverses: true),
-                value: isAnimating
-            )
-            .overlay {
-                if !reduceMotion {
-                    LinearGradient(
-                        colors: [.clear, Color.white.opacity(0.9), .clear],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(width: size * 0.32, height: size * 1.6)
-                    .rotationEffect(.degrees(24))
-                    .offset(x: isAnimating ? size * 1.25 : -size * 1.25)
-                    .animation(
-                        .linear(duration: 1.15).repeatForever(autoreverses: false),
-                        value: isAnimating
-                    )
-                    .mask(PlainwordBrandMark(size: size))
+        GeometryReader { proxy in
+            let total = proxy.size.width
+            if reduceMotion {
+                line.frame(width: total)
+            } else {
+                TimelineView(.animation) { context in
+                    let elapsed = context.date.timeIntervalSinceReferenceDate
+                    let segment = segment(at: elapsed)
+                    line
+                        .frame(width: max(segment.width * total, 0))
+                        .offset(x: segment.leading * total)
                 }
             }
-            .frame(width: size, height: size)
-            .onAppear { isAnimating = !reduceMotion }
-            .onChange(of: reduceMotion) { _, shouldReduceMotion in
-                isAnimating = !shouldReduceMotion
-            }
-            .accessibilityHidden(true)
+        }
+        .frame(height: thickness)
+        .accessibilityHidden(true)
+    }
+
+    private var line: some View {
+        Capsule()
+            .fill(PlainwordTheme.accent)
+            .frame(height: thickness)
+    }
+
+    private func segment(at elapsed: Double) -> (leading: CGFloat, width: CGFloat) {
+        if drawsOnce {
+            // Anchored to the view's own arrival, so the mark is drawn for the reader
+            // rather than caught halfway through a loop that started without them.
+            let progress = min(max((elapsed - start - delay) / period, 0), 1)
+            return (0, CGFloat(eased(progress)))
+        }
+
+        let phase = elapsed.truncatingRemainder(dividingBy: period) / period
+        if phase <= 0.45 {
+            return (0, CGFloat(eased(phase / 0.45)))
+        }
+        let leading = eased((phase - 0.45) / 0.55)
+        return (CGFloat(leading), CGFloat(1 - leading))
+    }
+
+    private func eased(_ value: Double) -> Double {
+        let clamped = min(max(value, 0), 1)
+        return clamped * clamped * (3 - 2 * clamped)
+    }
+
+    @State private var start = Date.timeIntervalSinceReferenceDate
+}
+
+/// The trigger: a serif "p" whose full stop is drawn in green ink.
+private struct PlainwordTriggerChip: View {
+    let isWorking: Bool
+
+    var body: some View {
+        VStack(spacing: 3) {
+            (
+                Text(verbatim: "p").foregroundStyle(PlainwordTheme.textPrimary)
+                    + Text(verbatim: ".").foregroundStyle(PlainwordTheme.accent)
+            )
+            .font(PlainwordFont.serif(16, weight: .medium))
+
+            DrawingUnderline(
+                thickness: 1.5,
+                drawsOnce: !isWorking,
+                period: isWorking ? 1.3 : 0.5,
+                delay: isWorking ? 0 : 0.25
+            )
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 7)
     }
 }
 
@@ -1459,6 +1618,7 @@ private struct CrossAppProposalView: View {
     let onBack: () -> Void
     let onRequestPrompt: () -> Void
     let onSubmitPrompt: (String) -> Void
+    let onRetry: () -> Void
     let onPreviewModeChange: (SuggestionPreviewMode) -> Void
     let onToggleContextReceipt: () -> Void
     let onSetContextSendingEnabled: (Bool) -> Void
@@ -1468,21 +1628,18 @@ private struct CrossAppProposalView: View {
 
     @ViewBuilder
     var body: some View {
-        if model.phase == .promptTrigger || model.phase == .promptTriggerLoading {
+        switch model.phase {
+        case .promptTrigger, .promptTriggerLoading:
             promptTrigger
-        } else {
+        case .applied:
+            appliedChip
+        default:
             ZStack(alignment: model.pointerEdge == .top ? .topLeading : .bottomLeading) {
                 proposalSurface
                     .padding(model.pointerEdge == .top ? .top : .bottom, 7)
 
-                ProposalPointer(edge: model.pointerEdge)
-                    .fill(PlainwordTheme.surface)
-                    .overlay {
-                        ProposalPointer(edge: model.pointerEdge)
-                            .stroke(PlainwordTheme.strongSeparator, lineWidth: 1)
-                    }
-                    .frame(width: 13, height: 8)
-                    .offset(x: 36)
+                pointer()
+                    .offset(x: 34)
             }
             .foregroundStyle(PlainwordTheme.textPrimary)
             .background(.clear)
@@ -1500,25 +1657,45 @@ private struct CrossAppProposalView: View {
         }
     }
 
+    /// The tab that ties the panel to the field it is talking about. It carries the
+    /// panel's own border so the two read as one shape rather than two.
+    ///
+    /// A point taller than it looks, so its fill covers the panel's own border where
+    /// the two meet and the tab grows out of the edge rather than sitting on it.
+    private func pointer(width: CGFloat = 14) -> some View {
+        ZStack {
+            ProposalPointer(edge: model.pointerEdge)
+                .fill(PlainwordTheme.surface)
+
+            // Only the two slanted sides are drawn. Stroking the closed triangle
+            // would also draw its base — the very edge the tab is meant to merge
+            // into — and that line is what reads as a border around the tab.
+            ProposalPointerOutline(edge: model.pointerEdge)
+                .stroke(
+                    PlainwordTheme.strongSeparator,
+                    style: StrokeStyle(lineWidth: 1, lineCap: .butt, lineJoin: .miter)
+                )
+        }
+        .frame(width: width, height: 8)
+    }
+
     private var promptTrigger: some View {
         ZStack(alignment: model.pointerEdge == .top ? .top : .bottom) {
             Button {
                 guard model.phase != .promptTriggerLoading else { return }
                 onRequestPrompt()
             } label: {
-                Group {
-                    if model.phase == .promptTriggerLoading {
-                        PlainwordLoadingMark(size: 24)
-                    } else {
-                        PlainwordBrandMark(size: 24)
-                    }
-                }
-                    .frame(width: 42, height: 42)
+                // No shadow drawn here: the panel is sized to the chip, so a soft
+                // shadow has nowhere to fall and is cut off square at the window's
+                // edge — which is seen as a hard line boxing the chip in. The panel
+                // window casts its own shadow, outside its frame, as the proposal
+                // panel does.
+                PlainwordTriggerChip(isWorking: model.phase == .promptTriggerLoading)
                     .background(PlainwordTheme.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                     .overlay {
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .stroke(PlainwordTheme.strongSeparator, lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(PlainwordTheme.strongSeparator, lineWidth: 1)
                     }
             }
             .buttonStyle(.plain)
@@ -1529,16 +1706,35 @@ private struct CrossAppProposalView: View {
             )
             .padding(model.pointerEdge == .top ? .top : .bottom, 7)
 
-            ProposalPointer(edge: model.pointerEdge)
-                .fill(PlainwordTheme.surface)
-                .overlay {
-                    ProposalPointer(edge: model.pointerEdge)
-                        .stroke(PlainwordTheme.strongSeparator, lineWidth: 1)
-                }
-                .frame(width: 13, height: 8)
+            pointer(width: 12)
         }
-        .frame(width: 48, height: 49)
+        .frame(width: CorrectionPresentationMetrics.triggerSize.width,
+               height: CorrectionPresentationMetrics.triggerSize.height)
         .background(.clear)
+    }
+
+    /// What replaces the panel once an edit lands: the smallest possible receipt,
+    /// stated in the accent that did the work.
+    private var appliedChip: some View {
+        HStack(spacing: 7) {
+            Text(verbatim: "\u{2713}")
+                .font(PlainwordFont.ui(13, weight: .bold))
+            Text("Applied")
+                .font(PlainwordFont.ui(12, weight: .bold))
+        }
+        .foregroundStyle(PlainwordTheme.accentText)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(
+            PlainwordTheme.accent,
+            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+        )
+        .frame(
+            width: CorrectionPresentationMetrics.appliedSize.width,
+            height: CorrectionPresentationMetrics.appliedSize.height,
+            alignment: model.pointerEdge == .top ? .topLeading : .bottomLeading
+        )
+        .accessibilityLabel("Applied")
     }
 
     private var proposalSurface: some View {
@@ -1552,37 +1748,41 @@ private struct CrossAppProposalView: View {
                 phaseContent
                     .id(model.contentGeneration)
                     .zIndex(Double(model.contentGeneration))
-                    .transition(.opacity.combined(with: .offset(y: 3)))
+                    .transition(PlainwordMotion.rise)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .clipped()
         }
         .background(PlainwordTheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .clipShape(
+            RoundedRectangle(cornerRadius: PlainwordTheme.panelCornerRadius, style: .continuous)
+        )
         .overlay {
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .stroke(PlainwordTheme.strongSeparator, lineWidth: 1)
+            RoundedRectangle(cornerRadius: PlainwordTheme.panelCornerRadius, style: .continuous)
+                .strokeBorder(PlainwordTheme.strongSeparator, lineWidth: 1)
         }
     }
 
     @ViewBuilder
     private var phaseContent: some View {
         switch model.phase {
-        case .promptTrigger, .promptTriggerLoading:
+        case .promptTrigger, .promptTriggerLoading, .applied:
             EmptyView()
         case .prompting:
             promptingContent
         case .processing:
             processingContent
         case .unchanged:
-            statusContent("No changes suggested.")
-        case .failure(let message):
-            Text(message)
-                .font(.system(size: 13))
-                .foregroundStyle(PlainwordTheme.danger)
-                .lineLimit(4)
-                .padding(13)
+            // An aside rather than a status line: nothing happened, and the panel
+            // says so in the same voice it would have used to suggest something.
+            Text("Looks good — nothing to change.")
+                .font(PlainwordFont.serif(14, italic: true))
+                .foregroundStyle(PlainwordTheme.textSecondary)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 14)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        case .failure(let message):
+            failureContent(message)
         case .streaming, .ready:
             suggestionContent
         }
@@ -1591,28 +1791,18 @@ private struct CrossAppProposalView: View {
     private var header: some View {
         HStack(spacing: 8) {
             if model.showsBackButton {
-                Button(action: onBack) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 21, height: 21)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(PlainwordTheme.textSecondary)
-                .help("Back to previous suggestion")
-                .accessibilityLabel("Back to previous suggestion")
+                PanelGlyphButton(
+                    systemImage: "chevron.left",
+                    help: "Back to previous suggestion",
+                    action: onBack
+                )
             }
 
             HStack(spacing: 8) {
-                if model.isWorking {
-                    PlainwordLoadingMark(size: 21)
-                        .frame(width: 21, height: 21)
-                } else {
-                    PlainwordBrandMark(size: 21)
-                }
+                PlainwordBrandMark(size: 20)
 
                 Text(headerTitle)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(PlainwordFont.serif(14.5, weight: .medium))
                     .lineLimit(1)
 
                 Spacer(minLength: 8)
@@ -1622,52 +1812,41 @@ private struct CrossAppProposalView: View {
             }
 
             if model.showsPromptButton {
-                Button(action: onRequestPrompt) {
-                    Image(systemName: "wand.and.stars")
-                        .font(.system(size: 12, weight: .medium))
-                        .frame(width: 21, height: 21)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(PlainwordTheme.textSecondary)
-                .help("Tell Plainword how to change this text")
-                .accessibilityLabel("Custom edit")
+                PanelGlyphButton(
+                    systemImage: "wand.and.stars",
+                    help: "Tell Plainword how to change this text",
+                    accessibilityLabel: "Custom edit",
+                    action: onRequestPrompt
+                )
             }
 
             Text(headerDetail)
-                .font(.system(size: 11))
-                .foregroundStyle(PlainwordTheme.textSecondary)
+                .font(PlainwordFont.mono(10))
+                .foregroundStyle(PlainwordTheme.textTertiary)
                 .lineLimit(1)
 
-            Button(action: onDismiss) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(PlainwordTheme.textSecondary)
-            .help("Close")
-            .accessibilityLabel("Close popover")
+            PanelGlyphButton(
+                systemImage: "xmark",
+                help: "Close",
+                accessibilityLabel: "Close popover",
+                action: onDismiss
+            )
         }
         .padding(.horizontal, 12)
-        .frame(height: 43)
+        .frame(height: CorrectionPresentationMetrics.headerHeight)
     }
 
-    private func statusContent(_ message: String) -> some View {
-        Text(message)
-            .font(.system(size: 13))
-            .foregroundStyle(PlainwordTheme.textSecondary)
-            .padding(.horizontal, 13)
-            .padding(.vertical, 11)
-            .frame(maxWidth: .infinity, alignment: .leading)
+    /// A label that names the section rather than saying something: machinery voice.
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(PlainwordFont.mono(9.5))
+            .tracking(0.76)
+            .foregroundStyle(PlainwordTheme.textTertiary)
     }
 
     private var promptContent: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(promptCaption)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(PlainwordTheme.textSecondary)
+        VStack(alignment: .leading, spacing: 9) {
+            sectionLabel(promptCaption)
 
             TextField(
                 model.isComposing
@@ -1679,63 +1858,87 @@ private struct CrossAppProposalView: View {
                 )
             )
             .textFieldStyle(.plain)
-            .font(.system(size: 13))
+            .font(PlainwordFont.ui(13))
             .lineLimit(1)
             .focused($promptFocused)
-            .padding(.horizontal, 9)
+            .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(
-                PlainwordTheme.raisedSurface,
-                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                PlainwordTheme.fieldSurface,
+                in: RoundedRectangle(
+                    cornerRadius: PlainwordTheme.controlCornerRadius,
+                    style: .continuous
+                )
             )
             .overlay {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .stroke(
-                        promptFocused
-                            ? PlainwordTheme.accent.opacity(0.8)
-                            : PlainwordTheme.strongSeparator,
-                        lineWidth: 1
-                    )
+                RoundedRectangle(
+                    cornerRadius: PlainwordTheme.controlCornerRadius,
+                    style: .continuous
+                )
+                .strokeBorder(
+                    promptFocused ? PlainwordTheme.accent : PlainwordTheme.strongSeparator,
+                    lineWidth: 1
+                )
             }
+            .background {
+                if promptFocused {
+                    RoundedRectangle(
+                        cornerRadius: PlainwordTheme.controlCornerRadius + 3,
+                        style: .continuous
+                    )
+                    .fill(PlainwordTheme.accentMuted)
+                    .padding(-3)
+                }
+            }
+            .animation(PlainwordMotion.content, value: promptFocused)
 
             // The shortcuts change text that is already there, so composing has
             // nothing for them to act on.
             if !model.isComposing {
-                HStack(spacing: 5) {
+                HStack(spacing: 6) {
                     ForEach(TransformShortcut.allCases) { shortcut in
-                        Button(shortcut.title) {
-                            onSubmitPrompt(shortcut.instruction)
-                        }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(PlainwordTheme.textSecondary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(
-                            hoveredTransformShortcut == shortcut
-                                ? PlainwordTheme.hoverSurface
-                                : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        )
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                .stroke(PlainwordTheme.strongSeparator, lineWidth: 1)
-                        }
-                        .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                        .onHover { isHovering in
-                            hoveredTransformShortcut = isHovering ? shortcut : nil
-                        }
-                        .accessibilityHint("Transforms the selected text immediately")
+                        transformShortcutChip(shortcut)
                     }
                 }
             }
         }
         .padding(.horizontal, 13)
-        .padding(.vertical, 11)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
             DispatchQueue.main.async { promptFocused = true }
         }
+    }
+
+    private func transformShortcutChip(_ shortcut: TransformShortcut) -> some View {
+        let isHovering = hoveredTransformShortcut == shortcut
+        return Button(shortcut.title) {
+            onSubmitPrompt(shortcut.instruction)
+        }
+        .buttonStyle(.plain)
+        .font(PlainwordFont.ui(11, weight: .bold))
+        .foregroundStyle(
+            isHovering ? PlainwordTheme.textPrimary : PlainwordTheme.textSecondary
+        )
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(
+            isHovering ? PlainwordTheme.raisedSurface : Color.clear,
+            in: RoundedRectangle(
+                cornerRadius: PlainwordTheme.smallCornerRadius,
+                style: .continuous
+            )
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: PlainwordTheme.smallCornerRadius, style: .continuous)
+                .strokeBorder(PlainwordTheme.strongSeparator, lineWidth: 1)
+        }
+        .contentShape(
+            RoundedRectangle(cornerRadius: PlainwordTheme.smallCornerRadius, style: .continuous)
+        )
+        .onHover { hoveredTransformShortcut = $0 ? shortcut : nil }
+        .animation(PlainwordMotion.content, value: isHovering)
+        .accessibilityHint("Transforms the selected text immediately")
     }
 
     private var promptCaption: String {
@@ -1760,7 +1963,41 @@ private struct CrossAppProposalView: View {
 
     private var processingContent: some View {
         VStack(spacing: 0) {
-            statusContent("Checking clarity, correctness, and voice…")
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Reading it over…")
+                        .font(PlainwordFont.serif(14, italic: true))
+                        .foregroundStyle(PlainwordTheme.textSecondary)
+                    DrawingUnderline()
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 13)
+            .padding(.top, 14)
+            .padding(.bottom, 15)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("Reading it over")
+
+            Rectangle()
+                .fill(PlainwordTheme.separator)
+                .frame(height: 1)
+            footer
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func failureContent(_ message: String) -> some View {
+        VStack(spacing: 0) {
+            Text(message)
+                .font(PlainwordFont.ui(12.5))
+                .lineSpacing(2)
+                .foregroundStyle(PlainwordTheme.danger)
+                .lineLimit(4)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(13)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
             Rectangle()
                 .fill(PlainwordTheme.separator)
                 .frame(height: 1)
@@ -1771,15 +2008,15 @@ private struct CrossAppProposalView: View {
 
     private var suggestionContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if model.contentRequiresScrolling {
-                ScrollView(.vertical) {
-                    suggestionBody
-                }
-                .scrollIndicators(.automatic)
-                .scrollBounceBehavior(.basedOnSize)
-            } else {
+            // One scroll view either way. Swapping it in and out when the content
+            // crosses the panel's height rebuilds the body in the middle of the
+            // resize, which is seen as the suggestion flickering.
+            ScrollView(.vertical) {
                 suggestionBody
             }
+            .scrollIndicators(model.contentRequiresScrolling ? .automatic : .never)
+            .scrollDisabled(!model.contentRequiresScrolling)
+            .scrollBounceBehavior(.basedOnSize)
 
             Rectangle()
                 .fill(PlainwordTheme.separator)
@@ -1813,7 +2050,7 @@ private struct CrossAppProposalView: View {
                 }
                 // Dimmed when this suggestion was not given them, so the difference
                 // between "available" and "used" is visible rather than explained.
-                .opacity(model.contextWasSentWithSuggestion ? 1 : 0.5)
+                .opacity(model.contextWasSentWithSuggestion ? 1 : 0.45)
             }
 
         }
@@ -1828,7 +2065,7 @@ private struct CrossAppProposalView: View {
             alignment: .topLeading
         )
         .background(PlainwordTheme.raisedSurface)
-        .transition(.opacity.combined(with: .offset(y: 4)))
+        .transition(PlainwordMotion.rise)
     }
 
     /// Switching this sends nothing and changes nothing about the suggestion on screen.
@@ -1839,13 +2076,13 @@ private struct CrossAppProposalView: View {
             set: { onSetContextSendingEnabled($0) }
         )) {
             Text("Attach context from \(model.contextApplicationName)")
-                .font(.system(size: 11))
+                .font(PlainwordFont.ui(11.5))
                 .foregroundStyle(PlainwordTheme.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
         .toggleStyle(.switch)
-        .controlSize(.small)
+        .controlSize(.mini)
         .tint(PlainwordTheme.accent)
         .frame(height: ContextReceiptMetrics.controlRowHeight)
         .hoverTip("""
@@ -1857,29 +2094,16 @@ private struct CrossAppProposalView: View {
         )
     }
 
-    private func receiptCaption(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 10))
-            .foregroundStyle(PlainwordTheme.textSecondary)
-            .lineLimit(1)
-            .frame(height: ContextReceiptMetrics.captionHeight, alignment: .leading)
-    }
-
     private func receiptRow(_ item: ReadOnlyContextReceiptItem) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: receiptSymbol(for: item.category))
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(PlainwordTheme.textSecondary)
-                .frame(width: 13)
-
-            Text(item.title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(PlainwordTheme.textSecondary)
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(item.title.uppercased())
+                .font(PlainwordFont.mono(9.5))
+                .foregroundStyle(PlainwordTheme.textTertiary)
                 .lineLimit(1)
                 .frame(width: 72, alignment: .leading)
 
             Text(item.detail)
-                .font(.system(size: 11))
+                .font(PlainwordFont.ui(11))
                 .foregroundStyle(PlainwordTheme.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -1887,7 +2111,7 @@ private struct CrossAppProposalView: View {
             Spacer(minLength: 0)
         }
         .frame(height: ContextReceiptMetrics.rowHeight)
-        // The whole row answers the hover, not just the glyphs in it.
+        // The whole row answers the hover, not just the label in it.
         .contentShape(Rectangle())
         // A row shows one line; hovering shows the whole value it stands for.
         .hoverTip("\(item.title): \(item.detail)")
@@ -1895,29 +2119,24 @@ private struct CrossAppProposalView: View {
         .accessibilityLabel("\(item.title): \(item.detail)")
     }
 
-    private func receiptSymbol(
-        for category: ReadOnlyContextReceiptItem.Category
-    ) -> String {
-        switch category {
-        case .application: "app.dashed"
-        case .field: "character.cursor.ibeam"
-        case .document: "doc.text"
-        case .nearbyText: "text.alignleft"
-        case .surroundingText: "text.insert"
-        }
-    }
-
     @ViewBuilder
     private var suggestionBody: some View {
         if let suggestion = model.suggestion {
             suggestionDetails(suggestion)
-                .padding(13)
+                .padding(.horizontal, 13)
+                .padding(.top, 12)
+                .padding(.bottom, 14)
         } else {
-            StreamingTextView(
-                text: model.correctedText,
-                isStreaming: model.phase == .streaming
-            )
-            .padding(13)
+            VStack(alignment: .leading, spacing: 7) {
+                sectionLabel("Suggested revision")
+                StreamingTextView(
+                    text: model.correctedText,
+                    isStreaming: model.phase == .streaming
+                )
+            }
+            .padding(.horizontal, 13)
+            .padding(.top, 12)
+            .padding(.bottom, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -1930,8 +2149,7 @@ private struct CrossAppProposalView: View {
         case .completion:
             labeledText(
                 "Finish with",
-                text: suggestion.changes.first?.replacement ?? suggestion.replacementText,
-                emphasized: true
+                text: suggestion.changes.first?.replacement ?? suggestion.replacementText
             )
         case .composition:
             // Nothing was replaced, so there is no diff to offer: the draft is the
@@ -1945,12 +2163,12 @@ private struct CrossAppProposalView: View {
     private func replacementPreview(_ suggestion: WritingSuggestion) -> some View {
         let phrases = replacementPhrases(for: suggestion)
         let usesFullText = phrases.count > CorrectionPresentationMetrics.maximumChipCount
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 7) {
             sectionLabel(usesFullText ? "Suggested text" : "Use instead")
             if usesFullText {
                 Text(suggestion.replacementText)
-                    .font(.system(size: 14, weight: .medium))
-                    .lineSpacing(2)
+                    .font(PlainwordFont.serif(15))
+                    .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1968,29 +2186,30 @@ private struct CrossAppProposalView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// A word that goes in, drawn the way an insertion is drawn everywhere else:
+    /// green ink on a green wash.
     private func replacementChip(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 14, weight: .semibold))
+            .font(PlainwordFont.serif(15, weight: .medium))
             .foregroundStyle(PlainwordTheme.accent)
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .background(
                 PlainwordTheme.accentMuted,
-                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                in: RoundedRectangle(
+                    cornerRadius: PlainwordTheme.smallCornerRadius,
+                    style: .continuous
+                )
             )
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func labeledText(
-        _ label: String,
-        text: String,
-        emphasized: Bool = false
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func labeledText(_ label: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
             sectionLabel(label)
             Text(text)
-                .font(.system(size: 13, weight: emphasized ? .semibold : .regular))
-                .lineSpacing(2)
+                .font(PlainwordFont.serif(15))
+                .lineSpacing(4)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
         }
@@ -1998,7 +2217,7 @@ private struct CrossAppProposalView: View {
     }
 
     private func fallbackPreview(_ suggestion: WritingSuggestion) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 8) {
                 sectionLabel("Proposed edit")
                 Spacer(minLength: 8)
@@ -2006,53 +2225,43 @@ private struct CrossAppProposalView: View {
             }
             .frame(height: CorrectionPresentationMetrics.previewHeaderHeight)
 
-            if model.previewMode == .revised {
-                Text(suggestion.replacementText)
-                    .font(.system(size: 13))
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-            } else {
-                Text(attributedDiff(suggestion))
-                    .font(.system(size: 13))
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+            ZStack(alignment: .topLeading) {
+                Group {
+                    if model.previewMode == .revised {
+                        Text(suggestion.replacementText)
+                    } else {
+                        Text(attributedDiff(suggestion))
+                    }
+                }
+                .font(PlainwordFont.serif(15))
+                .lineSpacing(4)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .id(model.previewMode)
+                .transition(PlainwordMotion.rise)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var previewModePicker: some View {
-        Picker(
-            "Preview",
+        PlainwordSegmentedControl(
+            segments: [
+                PlainwordSegment(SuggestionPreviewMode.changes, "Changes"),
+                PlainwordSegment(SuggestionPreviewMode.revised, "Revised")
+            ],
             selection: Binding(
                 get: { model.previewMode },
-                set: { previewMode in
-                    onPreviewModeChange(previewMode)
-                }
-            )
-        ) {
-            Text("Revised").tag(SuggestionPreviewMode.revised)
-            Text("Changes").tag(SuggestionPreviewMode.changes)
-        }
-        .labelsHidden()
-        .pickerStyle(.segmented)
-        .controlSize(.small)
-        .fixedSize()
-        .accessibilityLabel("Suggestion preview")
-    }
-
-    private func sectionLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 10, weight: .semibold))
-            .tracking(0.55)
-            .textCase(.uppercase)
-            .foregroundStyle(PlainwordTheme.textSecondary)
+                set: { onPreviewModeChange($0) }
+            ),
+            accessibilityLabel: "Suggestion preview",
+            compact: true
+        )
     }
 
     private var footer: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 7) {
             if model.phase == .prompting {
                 Spacer(minLength: 8)
                 Button(action: model.showsPromptBackButton ? onBack : onDismiss) {
@@ -2068,19 +2277,34 @@ private struct CrossAppProposalView: View {
                 } label: {
                     PlainwordShortcutLabel(
                         model.isComposing ? "Write" : "Transform",
-                        shortcut: "↩"
+                        shortcut: "↩",
+                        shortcutOpacity: 0.7
                     )
                 }
                 .buttonStyle(PlainwordButtonStyle(.primary))
                 .keyboardShortcut(.return, modifiers: [])
                 .disabled(!model.canSubmitPrompt)
             } else if model.isWorking {
-                Text(model.phase == .processing ? "Connecting…" : "Writing…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(PlainwordTheme.textSecondary)
+                // Only while text is arriving. The processing panel already says
+                // "Reading it over…" a few points above this, and one wait does not
+                // need two labels.
+                if model.phase == .streaming {
+                    Text("writing…")
+                        .font(PlainwordFont.mono(10))
+                        .foregroundStyle(PlainwordTheme.textTertiary)
+                }
                 Spacer()
                 Button("Cancel", action: onDismiss)
                     .buttonStyle(PlainwordButtonStyle())
+            } else if case .failure = model.phase {
+                Spacer(minLength: 8)
+                Button("Dismiss", action: onDismiss)
+                    .buttonStyle(PlainwordButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                if model.canRetry {
+                    Button("Try again", action: onRetry)
+                        .buttonStyle(PlainwordButtonStyle(.primary))
+                }
             } else {
                 if model.showsContextReceipt {
                     contextReceiptToggle
@@ -2097,7 +2321,11 @@ private struct CrossAppProposalView: View {
                 }
                 if model.phase == .ready {
                     Button(action: onAccept) {
-                        PlainwordShortcutLabel(acceptTitle, shortcut: "⌘↩")
+                        PlainwordShortcutLabel(
+                            acceptTitle,
+                            shortcut: "⌘↩",
+                            shortcutOpacity: 0.7
+                        )
                     }
                         .buttonStyle(PlainwordButtonStyle(.primary))
                         .keyboardShortcut(.return, modifiers: [.command])
@@ -2107,20 +2335,23 @@ private struct CrossAppProposalView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 12)
-        .frame(height: 52)
+        .frame(height: CorrectionPresentationMetrics.footerHeight)
     }
 
     private var contextReceiptToggle: some View {
         Button(action: onToggleContextReceipt) {
             Image(systemName: "paperclip")
-                .font(.system(size: 11, weight: .medium))
+                .font(PlainwordFont.ui(11, weight: .medium))
                 .rotationEffect(.degrees(model.isContextReceiptExpanded ? -20 : 0))
-                .frame(width: 22, height: 22)
+                .frame(width: 24, height: 24)
                 .background(
                     model.isContextSendingEnabled
                         ? PlainwordTheme.accentMuted
                         : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    in: RoundedRectangle(
+                        cornerRadius: PlainwordTheme.smallCornerRadius,
+                        style: .continuous
+                    )
                 )
                 .contentShape(Rectangle())
         }
@@ -2130,6 +2361,7 @@ private struct CrossAppProposalView: View {
                 ? PlainwordTheme.accent
                 : PlainwordTheme.textSecondary
         )
+        .animation(PlainwordMotion.content, value: model.isContextReceiptExpanded)
         .hoverTip("""
         \(ReadOnlyContextReceipt.summary(
                 forItemCount: model.contextReceipt.count,
@@ -2149,7 +2381,7 @@ private struct CrossAppProposalView: View {
 
     private var headerTitle: String {
         switch model.phase {
-        case .promptTrigger, .promptTriggerLoading: ""
+        case .promptTrigger, .promptTriggerLoading, .applied: ""
         case .prompting:
             model.showsPromptBackButton
                 ? "Apply another transformation"
@@ -2210,6 +2442,7 @@ private struct CrossAppProposalView: View {
         return phrases.isEmpty ? ["Delete marked text"] : phrases
     }
 
+    /// The editor's marks: red pencil through what goes, green ink under what arrives.
     private func attributedDiff(_ suggestion: WritingSuggestion) -> AttributedString {
         var result = AttributedString()
         for segment in WritingDiffPlanner.make(
@@ -2222,7 +2455,7 @@ private struct CrossAppProposalView: View {
                 fragment.foregroundColor = PlainwordTheme.textPrimary
             case .removed:
                 fragment.foregroundColor = PlainwordTheme.danger
-                fragment.backgroundColor = PlainwordTheme.danger.opacity(0.1)
+                fragment.backgroundColor = PlainwordTheme.dangerMuted
                 fragment.strikethroughStyle = Text.LineStyle(
                     pattern: .solid,
                     color: PlainwordTheme.danger
@@ -2230,10 +2463,45 @@ private struct CrossAppProposalView: View {
             case .inserted:
                 fragment.foregroundColor = PlainwordTheme.accent
                 fragment.backgroundColor = PlainwordTheme.accentMuted
+                fragment.font = PlainwordFont.serif(15, weight: .medium)
             }
             result.append(fragment)
         }
         return result
+    }
+}
+
+/// A borderless glyph in the panel's chrome: quiet until the pointer finds it.
+private struct PanelGlyphButton: View {
+    let systemImage: String
+    let help: String
+    var accessibilityLabel: String?
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(PlainwordFont.ui(11, weight: .semibold))
+                .foregroundStyle(
+                    isHovering ? PlainwordTheme.textPrimary : PlainwordTheme.textSecondary
+                )
+                .frame(width: 22, height: 22)
+                .background(
+                    isHovering ? PlainwordTheme.raisedSurface : .clear,
+                    in: RoundedRectangle(
+                        cornerRadius: PlainwordTheme.smallCornerRadius,
+                        style: .continuous
+                    )
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .animation(PlainwordMotion.content, value: isHovering)
+        .help(help)
+        .accessibilityLabel(accessibilityLabel ?? help)
     }
 }
 
@@ -2282,6 +2550,29 @@ private final class PanelDragView: NSView {
     override func mouseUp(with event: NSEvent) {
         initialMouseLocation = nil
         initialWindowOrigin = nil
+    }
+}
+
+/// The two slanted sides of the tab, as an open path.
+///
+/// Separate from the filled shape below because a triangle that is stroked as one
+/// closed path also draws the base it is supposed to disappear into.
+private struct ProposalPointerOutline: Shape {
+    let edge: ProposalPointerEdge
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        switch edge {
+        case .top:
+            path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+            path.addLine(to: CGPoint(x: rect.midX, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        case .bottom:
+            path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        }
+        return path
     }
 }
 

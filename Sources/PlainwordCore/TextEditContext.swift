@@ -218,26 +218,49 @@ public enum TextEditContextExtractor {
         )
     }
 
-    /// Returns a zero-length target at the caret of a field that holds no text.
+    /// Returns a zero-length target at a caret that has no text of its own to revise.
     ///
     /// `extract` deliberately refuses an empty target, because every editing request
     /// needs something to revise. Writing new text is the one case that does not, so it
     /// gets its own entry point rather than a flag that would loosen that rule for
     /// every caller.
+    ///
+    /// The caret qualifies whenever its own paragraph is blank, not only when the whole
+    /// field is. A cursor resting on an empty line between two paragraphs is exactly
+    /// where an author means to write something new, and refusing it there left the
+    /// review shortcut with nothing to do at all.
     public static func insertionPoint(
         in fullText: String,
-        at utf16Location: Int
+        at utf16Location: Int,
+        maximumSurroundingContextUTF16Length: Int = 320
     ) -> TextEditContext? {
         let source = fullText as NSString
         guard utf16Location >= 0,
               utf16Location <= source.length,
-              !fullText.contains(where: { !$0.isWhitespace }) else {
+              caretParagraphIsBlank(in: source, at: utf16Location) else {
             return nil
         }
+
+        // Whatever surrounds a blank line is all the request has to write from, so it
+        // travels as read-only context. An empty field simply has none of it.
+        let caret = NSRange(location: utf16Location, length: 0)
+        let surroundingSentenceRanges = sentenceRanges(in: fullText)
         return TextEditContext(
             text: "",
             utf16Location: utf16Location,
             utf16Length: 0,
+            leadingContext: sentenceContextBefore(
+                caret,
+                limit: maximumSurroundingContextUTF16Length,
+                source: source,
+                sentenceRanges: surroundingSentenceRanges
+            ),
+            trailingContext: sentenceContextAfter(
+                caret,
+                limit: maximumSurroundingContextUTF16Length,
+                source: source,
+                sentenceRanges: surroundingSentenceRanges
+            ),
             targetKind: .insertionPoint
         )
     }
@@ -377,6 +400,24 @@ public enum TextEditContextExtractor {
             utf16Location == range.location
                 || (utf16Location > range.location && utf16Location < NSMaxRange(range))
         }
+    }
+
+    /// Reports whether the paragraph holding the caret carries no text.
+    ///
+    /// A caret at the very end of the text is treated as its own empty paragraph when
+    /// the text ends in a line break, since that is where a trailing blank line puts it
+    /// and `paragraphRange(for:)` would otherwise answer with the line above.
+    private static func caretParagraphIsBlank(in source: NSString, at utf16Location: Int) -> Bool {
+        guard source.length > 0 else { return true }
+        let anchor = min(utf16Location, source.length - 1)
+        if utf16Location >= source.length,
+           source
+            .substring(with: NSRange(location: anchor, length: 1))
+            .allSatisfy(\.isNewline) {
+            return true
+        }
+        let paragraph = source.paragraphRange(for: NSRange(location: anchor, length: 0))
+        return source.substring(with: paragraph).allSatisfy(\.isWhitespace)
     }
 
     private static func paragraphRange(in source: NSString, around utf16Location: Int) -> NSRange {

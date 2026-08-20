@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Plainword — social share card</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400..700&family=Nunito+Sans:opsz,wght@6..12,400..800&family=Fragment+Mono&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* Plainword Ink, light ("paper") — copied from src/index.css. Keep in sync. */
+      :root {
+        --pw-canvas: #efe9dd;
+        --pw-surface: #fbf8f1;
+        --pw-raised: #f4efe4;
+        --pw-field: #f1ebde;
+        --pw-ink: #26211a;
+        --pw-ink-soft: #6f6759;
+        --pw-ink-faint: #9c937f;
+        --pw-line: #e3dccb;
+        --pw-line-strong: #d2c9b4;
+        --pw-accent: #33684c;
+        --pw-accent-strong: #27543d;
+        --pw-accent-muted: #e3ebe0;
+        --pw-accent-ink: #f7f4ea;
+        --pw-danger: #a6453e;
+        --pw-danger-muted: #f5e3de;
+        --serif: "Newsreader", ui-serif, Georgia, serif;
+        --sans: "Nunito Sans", -apple-system, Helvetica, Arial, sans-serif;
+        --mono: "Fragment Mono", ui-monospace, Menlo, monospace;
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      body {
+        width: 1200px;
+        height: 630px;
+        overflow: hidden;
+        background: var(--pw-canvas);
+        color: var(--pw-ink);
+        font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* One faint ink wash, as on the site's Backdrop. */
+      .card {
+        position: relative;
+        width: 1200px;
+        height: 630px;
+        padding: 64px 72px;
+        display: flex;
+        align-items: center;
+        gap: 44px;
+        background:
+          radial-gradient(900px 620px at 88% -12%, rgb(51 104 76 / 0.13), transparent 62%),
+          radial-gradient(700px 520px at 4% 108%, rgb(51 104 76 / 0.07), transparent 60%),
+          linear-gradient(158deg, #f4efe4 0%, var(--pw-canvas) 46%, #e9e2d3 100%);
+      }
+      /* A hairline of ink green along the top, the way the app marks its own edge. */
+      .card::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto 0;
+        height: 5px;
+        background: linear-gradient(90deg, var(--pw-accent) 0%, var(--pw-accent-strong) 52%, rgb(51 104 76 / 0.25) 100%);
+      }
+
+      /* Left column ------------------------------------------------------ */
+      .copy { width: 548px; flex: none; }
+
+      .brand { display: flex; align-items: center; gap: 13px; margin-bottom: 34px; }
+      .brand img { width: 46px; height: 46px; border-radius: 11px; }
+      .brand b { font-family: var(--serif); font-size: 31px; font-weight: 600; letter-spacing: -0.01em; }
+      .brand span {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--pw-ink-faint);
+        border-left: 1px solid var(--pw-line-strong);
+        padding-left: 13px;
+        margin-left: 3px;
+      }
+
+      h1 {
+        font-family: var(--serif);
+        font-size: 60px;
+        font-weight: 600;
+        line-height: 1.07;
+        letter-spacing: -0.022em;
+        margin-bottom: 24px;
+      }
+      h1 em { font-style: normal; color: var(--pw-accent); }
+
+      p.lead {
+        font-size: 23px;
+        line-height: 1.5;
+        color: var(--pw-ink-soft);
+        max-width: 520px;
+        margin-bottom: 34px;
+      }
+
+      .meta { display: flex; align-items: center; gap: 14px; }
+      kbd {
+        font-family: var(--mono);
+        font-size: 16px;
+        color: var(--pw-ink);
+        background: var(--pw-surface);
+        border: 1px solid var(--pw-line-strong);
+        border-radius: 7px;
+        padding: 7px 12px;
+        box-shadow: 0 1px 0 rgb(72 56 28 / 0.06);
+      }
+      .meta span { font-family: var(--mono); font-size: 15px; color: var(--pw-ink-soft); }
+
+      /* Right column — the app's own popover, over the line it is fixing --- */
+      .stage { position: relative; flex: 1; height: 464px; }
+
+      .field {
+        position: absolute;
+        top: 8px;
+        left: 0;
+        width: 464px;
+        background: var(--pw-surface);
+        border: 1px solid var(--pw-line-strong);
+        border-radius: 12px;
+        padding: 15px 17px;
+        font-family: var(--serif);
+        font-size: 18.5px;
+        line-height: 1.55;
+        color: var(--pw-ink-soft);
+        box-shadow: 0 1px 2px rgb(72 56 28 / 0.05), 0 6px 18px rgb(72 56 28 / 0.06);
+      }
+      .field i { font-style: normal; border-bottom: 2px dotted var(--pw-danger); }
+      .field u {
+        text-decoration: none;
+        border-left: 2px solid var(--pw-accent);
+        margin-left: 1px;
+        animation: none;
+      }
+
+      .panel-wrap { position: absolute; top: 118px; left: 0; transform: scale(1.318); transform-origin: top left; }
+      .tab {
+        margin-left: 34px;
+        width: 0;
+        height: 0;
+        border-left: 7px solid transparent;
+        border-right: 7px solid transparent;
+        border-bottom: 7px solid var(--pw-surface);
+        filter: drop-shadow(0 -1px 0 var(--pw-line-strong));
+      }
+      .panel {
+        width: 352px;
+        background: var(--pw-surface);
+        border: 1px solid var(--pw-line-strong);
+        border-radius: 13px;
+        overflow: hidden;
+        box-shadow: 0 2px 5px rgb(72 56 28 / 0.06), 0 20px 40px rgb(72 56 28 / 0.13);
+      }
+      .panel header {
+        height: 42px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 12px;
+        border-bottom: 1px solid var(--pw-line);
+      }
+      .panel header img { width: 20px; height: 20px; border-radius: 5px; }
+      .panel header b { font-family: var(--serif); font-size: 14.5px; font-weight: 500; }
+      .panel header .detail { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--pw-ink-faint); }
+
+      .body { padding: 12px 13px 14px; }
+      .label {
+        font-family: var(--mono);
+        font-size: 9.5px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--pw-ink-faint);
+        margin-bottom: 7px;
+      }
+      .diff { font-family: var(--serif); font-size: 15px; line-height: 1.6; }
+      .diff .r {
+        background: var(--pw-danger-muted);
+        color: var(--pw-danger);
+        text-decoration: line-through;
+        border-radius: 3px;
+        padding: 0 1px;
+      }
+      .diff .i {
+        background: var(--pw-accent-muted);
+        color: var(--pw-accent);
+        font-weight: 500;
+        border-radius: 3px;
+        padding: 0 1px;
+      }
+
+      .panel footer {
+        height: 48px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 0 12px;
+        border-top: 1px solid var(--pw-line);
+      }
+      .clip {
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        background: var(--pw-accent-muted);
+        color: var(--pw-accent);
+        display: grid;
+        place-items: center;
+      }
+      .btn {
+        height: 28px;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        border-radius: 7px;
+        font-size: 12px;
+        font-weight: 700;
+        padding: 0 11px;
+        border: 1px solid var(--pw-line-strong);
+        color: var(--pw-ink);
+      }
+      .btn.primary { background: var(--pw-accent); color: var(--pw-accent-ink); border-color: transparent; padding: 0 12px; }
+      .btn .hint { font-family: var(--mono); font-size: 10px; opacity: 0.7; }
+      .spacer { flex: 1; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="copy">
+        <div class="brand">
+          <img src="../public/images/app-icon.png" alt="" />
+          <b>Plainword</b>
+          <span>for macOS</span>
+        </div>
+
+        <h1>Say what you mean,<br />wherever you write<em>.</em></h1>
+
+        <p class="lead">
+          Fix, rewrite or draft text right where you type it — in your tone, on your model,
+          with the conversation around your cursor for context.
+        </p>
+
+        <div class="meta">
+          <kbd>⌘ F2</kbd>
+          <span>Free &amp; open source</span>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="field">
+          I <i>beleive</i> <i>the the</i> report is finished, and I will send it
+          <i>tomorow</i> morning.<u>&nbsp;</u>
+        </div>
+
+        <div class="panel-wrap">
+          <div class="tab"></div>
+          <div class="panel">
+            <header>
+              <img src="../public/images/app-icon.png" alt="" />
+              <b>Small corrections</b>
+              <span class="detail">3 fixes</span>
+            </header>
+            <div class="body">
+              <div class="label">Proposed edit</div>
+              <div class="diff">
+                I <span class="r">beleive</span><span class="i">believe</span>
+                <span class="r">the the</span><span class="i">the</span> report is finished, and I
+                will send it <span class="r">tomorow</span><span class="i">tomorrow</span> morning.
+              </div>
+            </div>
+            <footer>
+              <span class="clip">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+              </span>
+              <span class="spacer"></span>
+              <span class="btn">Dismiss <span class="hint">esc</span></span>
+              <span class="btn primary">Apply 3 fixes <span class="hint">⌘↩</span></span>
+            </footer>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

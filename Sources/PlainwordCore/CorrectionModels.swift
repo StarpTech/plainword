@@ -83,7 +83,7 @@ public enum LLMProvider: String, CaseIterable, Codable, Identifiable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .openAICompatible: "OpenAI-compatible"
+        case .openAICompatible: "OpenAI"
         case .ollama: "Ollama"
         case .codex: "Codex"
         }
@@ -130,7 +130,7 @@ public struct LLMSettings: Codable, Equatable, Sendable {
         codexModel: String = "",
         authentication: ProviderAuthentication = .bearer,
         customHeaderName: String = "api-key",
-        thinkingMode: ThinkingMode = .low
+        thinkingMode: ThinkingMode = .off
     ) {
         self.provider = provider
         self.endpoint = endpoint

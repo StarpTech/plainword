@@ -4,7 +4,7 @@ import Button from './Button.jsx';
 import { CONTAINER } from './Section.jsx';
 
 const LINKS = [
-  { href: '#features', label: 'Features' },
+  { href: '#demo', label: 'How it works' },
   { href: '#privacy', label: 'Privacy' },
   { href: '#models', label: 'Models' },
 ];
@@ -24,7 +24,7 @@ export default function Nav() {
       className={
         'sticky top-0 z-50 border-b transition-colors duration-300 ' +
         (scrolled
-          ? 'border-line bg-canvas/75 shadow-nav backdrop-blur-xl backdrop-saturate-150'
+          ? 'border-line bg-canvas/80 shadow-hairline backdrop-blur-xl backdrop-saturate-150'
           : 'border-transparent')
       }
     >
@@ -35,21 +35,23 @@ export default function Nav() {
             alt="Plainword"
             className="h-8 w-8 rounded-control transition-transform group-hover:scale-105"
           />
-          <span className="text-md font-semibold tracking-tight">Plainword</span>
+          <span className="font-serif text-[19px] font-medium">
+            Plainword<span className="text-accent">.</span>
+          </span>
         </a>
         <div className="flex flex-wrap items-center gap-1 sm:gap-2">
           {LINKS.map((link) => (
             <a
               key={link.href}
               href={link.href}
-              className="hidden rounded-control px-3 py-2 text-sm text-ink-soft transition-colors hover:bg-brand-muted/60 hover:text-brand-strong sm:block"
+              className="hidden rounded-control px-3 py-2 text-sm font-semibold text-ink-soft transition-colors hover:bg-raised hover:text-ink sm:block"
             >
               {link.label}
             </a>
           ))}
           <a
             href={GITHUB_URL}
-            className="hidden rounded-control px-3 py-2 text-sm text-ink-soft transition-colors hover:bg-brand-muted/60 hover:text-brand-strong md:block"
+            className="hidden rounded-control px-3 py-2 text-sm font-semibold text-ink-soft transition-colors hover:bg-raised hover:text-ink md:block"
           >
             GitHub
           </a>

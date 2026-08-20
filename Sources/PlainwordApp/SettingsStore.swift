@@ -7,6 +7,7 @@ import PlainwordCore
 final class SettingsStore: ObservableObject {
     private enum PreferenceKey {
         static let appearance = "appAppearance"
+        static let showsDockIcon = "showsDockIcon"
         static let popoverShortcut = "popoverShortcut"
         static let popoverShortcutConfigured = "popoverShortcutConfigured"
         static let transformShortcut = "transformShortcut"
@@ -65,6 +66,15 @@ final class SettingsStore: ObservableObject {
         didSet {
             defaults.set(appearance.rawValue, forKey: PreferenceKey.appearance)
             appearance.apply()
+        }
+    }
+
+    /// Plainword lives in the menu bar, so the Dock tile is optional: hiding it
+    /// also takes the app out of ⌘-Tab, which is what people asking for this want.
+    @Published var showsDockIcon: Bool {
+        didSet {
+            defaults.set(showsDockIcon, forKey: PreferenceKey.showsDockIcon)
+            applyDockIconVisibility()
         }
     }
 
@@ -179,6 +189,7 @@ final class SettingsStore: ObservableObject {
         ) ?? installedSpellingLanguages.first ?? ""
         appearance = defaults.string(forKey: PreferenceKey.appearance)
             .flatMap(AppAppearance.init(rawValue:)) ?? .automatic
+        showsDockIcon = defaults.object(forKey: PreferenceKey.showsDockIcon) as? Bool ?? true
         let storedPopoverShortcut = defaults.data(forKey: PreferenceKey.popoverShortcut)
             .flatMap { try? JSONDecoder().decode(PopoverShortcut.self, from: $0) }
         popoverShortcut = storedPopoverShortcut
@@ -220,6 +231,21 @@ final class SettingsStore: ObservableObject {
             Task { [weak self] in
                 await self?.loadCodexStatusIfNeeded()
             }
+        }
+    }
+
+    /// Applies the stored choice to the running app. Switching policy drops the
+    /// app's active state, so whichever window was frontmost is raised again.
+    func applyDockIconVisibility() {
+        guard let application = NSApp else { return }
+        let policy: NSApplication.ActivationPolicy = showsDockIcon ? .regular : .accessory
+        guard application.activationPolicy() != policy else { return }
+
+        let frontmostWindow = application.keyWindow ?? application.mainWindow
+        application.setActivationPolicy(policy)
+        if frontmostWindow != nil || policy == .regular {
+            application.activate(ignoringOtherApps: true)
+            frontmostWindow?.makeKeyAndOrderFront(nil)
         }
     }
 

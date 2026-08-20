@@ -8,141 +8,115 @@ struct WritingSettingsView: View {
         SettingsPage {
             SettingsPageHeader(
                 title: "Writing",
-                subtitle: "Shape the voice of suggestions without changing your meaning.",
-                icon: "pencil.and.outline"
+                subtitle: "Shape the voice of suggestions without changing your meaning."
             )
 
-            VStack(alignment: .leading, spacing: 8) {
-                SettingsSectionLabel("Voice")
-                SettingsGroup {
-                    SettingsRow(
-                        "Tone",
-                        icon: "quote.bubble",
-                        detail: "The emotional character of suggestions."
-                    ) {
-                        Picker("Tone", selection: $settings.tone) {
-                            ForEach(Tone.allCases) { tone in
-                                Text(tone.displayName).tag(tone)
-                            }
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                        .controlSize(.large)
-                        .frame(width: 190, alignment: .trailing)
-                    }
+            SettingsSection("Voice") {
+                // Five tones do not fit beside their own name, so the choice takes the
+                // full width of the card rather than being squeezed against the label.
+                SettingsStackedRow(
+                    "Tone",
+                    detail: "The emotional character of suggestions."
+                ) {
+                    PlainwordSegmentedControl(
+                        segments: Tone.allCases.map { PlainwordSegment($0, $0.displayName) },
+                        selection: $settings.tone,
+                        accessibilityLabel: "Tone"
+                    )
+                }
 
+                SettingsDivider()
+
+                SettingsStackedRow(
+                    "Style",
+                    detail: "How suggestions are phrased and structured."
+                ) {
+                    PlainwordSegmentedControl(
+                        segments: WritingStyle.allCases.map {
+                            PlainwordSegment($0, $0.displayName)
+                        },
+                        selection: $settings.style,
+                        accessibilityLabel: "Style"
+                    )
+                }
+            }
+
+            SettingsSection("Language") {
+                SettingsRow("Writing language", detail: spellingModeDetail) {
+                    Picker("Writing language", selection: $settings.spellingLanguageMode) {
+                        ForEach(SpellingLanguageMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .controlSize(.regular)
+                    .frame(width: 170, alignment: .trailing)
+                }
+
+                if settings.spellingLanguageMode == .fixed {
                     SettingsDivider()
 
                     SettingsRow(
-                        "Style",
-                        icon: "textformat",
-                        detail: "How suggestions are phrased and structured."
+                        "Language",
+                        detail: "Uses this language as guidance for reviews."
                     ) {
-                        Picker("Style", selection: $settings.style) {
-                            ForEach(WritingStyle.allCases) { style in
-                                Text(style.displayName).tag(style)
-                            }
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                        .controlSize(.large)
-                        .frame(width: 190, alignment: .trailing)
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                SettingsSectionLabel("Language")
-                SettingsGroup {
-                    SettingsRow(
-                        "Writing language",
-                        icon: "character.book.closed",
-                        detail: spellingModeDetail
-                    ) {
-                        Picker("Writing language", selection: $settings.spellingLanguageMode) {
-                            ForEach(SpellingLanguageMode.allCases) { mode in
-                                Text(mode.displayName).tag(mode)
-                            }
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                        .controlSize(.large)
-                        .frame(width: 190, alignment: .trailing)
-                    }
-
-                    if settings.spellingLanguageMode == .fixed {
-                        SettingsDivider()
-
-                        SettingsRow(
-                            "Language",
-                            icon: "text.book.closed",
-                            detail: "Uses this language as guidance for reviews."
+                        Picker(
+                            "Dictionary",
+                            selection: $settings.fixedSpellingLanguageIdentifier
                         ) {
-                            Picker(
-                                "Dictionary",
-                                selection: $settings.fixedSpellingLanguageIdentifier
-                            ) {
-                                ForEach(settings.availableSpellingLanguages, id: \.self) { language in
-                                    Text(settings.spellingLanguageDisplayName(language))
-                                        .tag(language)
-                                }
+                            ForEach(settings.availableSpellingLanguages, id: \.self) { language in
+                                Text(settings.spellingLanguageDisplayName(language))
+                                    .tag(language)
                             }
-                            .labelsHidden()
-                            .pickerStyle(.menu)
-                            .controlSize(.large)
-                            .frame(width: 190, alignment: .trailing)
                         }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .controlSize(.regular)
+                        .frame(width: 170, alignment: .trailing)
                     }
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 7) {
                 SettingsSectionLabel("Prompt")
-                SettingsGroup {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Additional instructions")
-                                    .font(.system(size: 13, weight: .medium))
-                                Text("Appended to every writing request.")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(PlainwordTheme.textSecondary)
-                            }
-                        } icon: {
-                            Image(systemName: "text.badge.plus")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(PlainwordTheme.accent)
-                                .frame(width: 28, height: 28)
-                                .background(
-                                    PlainwordTheme.accent.opacity(0.09),
-                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                )
-                        }
-
-                        TextField(
-                            "For example: Prefer British English and avoid semicolons.",
-                            text: $settings.promptExtension,
-                            axis: .vertical
-                        )
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-                        .lineLimit(3...8)
-                        .padding(10)
-                        .background(
-                            PlainwordTheme.fieldSurface,
-                            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        )
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .stroke(PlainwordTheme.separator.opacity(0.8), lineWidth: 1)
-                        }
-                        .accessibilityLabel("Additional writing instructions")
+                VStack(alignment: .leading, spacing: 9) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Additional instructions")
+                            .font(PlainwordFont.ui(13, weight: .bold))
+                        Text("Appended to every writing request.")
+                            .font(PlainwordFont.ui(11))
+                            .foregroundStyle(PlainwordTheme.textSecondary)
                     }
-                    .padding(.vertical, 12)
+
+                    // Standing instructions are writing, so they are set in the
+                    // writing voice rather than the interface's.
+                    TextField(
+                        "For example: Prefer British English and avoid semicolons.",
+                        text: $settings.promptExtension,
+                        axis: .vertical
+                    )
+                    .textFieldStyle(.plain)
+                    .font(PlainwordFont.serif(13.5))
+                    .lineSpacing(3)
+                    .lineLimit(3...8)
+                    .padding(10)
+                    .background(
+                        PlainwordTheme.fieldSurface,
+                        in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(PlainwordTheme.strongSeparator, lineWidth: 1)
+                    }
+                    .accessibilityLabel("Additional writing instructions")
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .plainwordCard(cornerRadius: PlainwordTheme.cardCornerRadius)
             }
         }
-        .navigationTitle("Writing")
+        .animation(PlainwordMotion.content, value: settings.spellingLanguageMode)
     }
 
     private var spellingModeDetail: String {

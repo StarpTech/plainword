@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @main
@@ -24,6 +25,7 @@ struct PlainwordApp: App {
             await settings?.shutdown()
         }
         settings.appearance.apply()
+        settings.applyDockIconVisibility()
         crossAppCorrections.start()
     }
 
@@ -66,6 +68,8 @@ private final class PlainwordApplicationDelegate: NSObject, NSApplicationDelegat
     }
 }
 
+/// The menu-bar dropdown, in the same paper card language as everything else:
+/// a raised surface, hairline rules, and mono shortcuts down the right.
 private struct PlainwordMenuView: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var crossAppCorrections: CrossAppCorrectionController
@@ -74,88 +78,74 @@ private struct PlainwordMenuView: View {
     let onOpenMainWindow: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                PlainwordBrandMark(size: 32)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Plainword")
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(PlainwordTheme.textPrimary)
-                    Text(crossAppCorrections.activity.label)
-                        .font(.caption)
-                        .foregroundStyle(PlainwordTheme.textSecondary)
-                        .lineLimit(1)
-                }
-
-                Spacer()
-
+        VStack(spacing: 1) {
+            MenuRow(title: "Suggestions", isEmphasized: true) {
                 Toggle("Suggestions", isOn: listeningBinding)
                     .labelsHidden()
                     .toggleStyle(.switch)
+                    .controlSize(.mini)
                     .tint(PlainwordTheme.accent)
             }
-            .padding(14)
-            .background(PlainwordTheme.raisedSurface.opacity(0.5))
 
             if crossAppCorrections.isListeningEnabled,
                !crossAppCorrections.isAccessibilityTrusted {
-                menuDivider
-                menuButton("Allow Accessibility", systemImage: "accessibility") {
+                MenuActionButton(title: "Allow Accessibility") {
                     crossAppCorrections.requestAccessibilityAccess()
                 }
             }
 
             if crossAppCorrections.isListeningEnabled, !settings.isLLMConfigured {
-                menuDivider
-                menuButton("Configure Provider", systemImage: "server.rack") {
+                MenuActionButton(title: "Configure Provider") {
                     onOpenMainWindow()
                 }
             }
 
             if let activeApplication = crossAppCorrections.activeApplication {
-                menuDivider
-
-                if crossAppCorrections.isReady,
-                   !crossAppCorrections.isActiveApplicationExcluded {
-                    menuButton(
-                        "Review Selection or Field",
-                        systemImage: "text.magnifyingglass"
-                    ) {
-                        onReviewSelectionOrField()
-                    }
-                    menuButton(
-                        "Transform Selection or Field…",
-                        systemImage: "wand.and.stars"
-                    ) {
-                        onTransformSelectionOrField()
-                    }
-                }
-
-                ApplicationMenuActionButton(
+                MenuActionButton(
                     title: crossAppCorrections.isActiveApplicationExcluded
                         ? "Enable in \(activeApplication.name)"
                         : "Ignore \(activeApplication.name)",
+                    // The row names one specific app, so it carries that app's own
+                    // icon: the reader recognises it before they read the sentence.
                     icon: activeApplication.icon,
-                    isExcluded: crossAppCorrections.isActiveApplicationExcluded
+                    isChecked: crossAppCorrections.isActiveApplicationExcluded
                 ) {
                     crossAppCorrections.toggleExclusionForActiveApplication()
+                }
+
+                if crossAppCorrections.isReady,
+                   !crossAppCorrections.isActiveApplicationExcluded {
+                    menuDivider
+
+                    MenuActionButton(
+                        title: "Review text",
+                        shortcut: settings.popoverShortcut?.displayText
+                    ) {
+                        onReviewSelectionOrField()
+                    }
+                    MenuActionButton(
+                        title: "Transform…",
+                        shortcut: settings.transformShortcut?.displayText
+                    ) {
+                        onTransformSelectionOrField()
+                    }
                 }
             }
 
             menuDivider
 
-            menuButton("Settings…", systemImage: "gearshape") {
+            MenuActionButton(title: "Settings…", shortcut: "⌘,") {
                 onOpenMainWindow()
             }
 
-            menuButton("Quit Plainword", systemImage: "power") {
+            MenuActionButton(title: "Quit Plainword") {
                 NSApp.terminate(nil)
             }
         }
-        .frame(width: 280)
+        .padding(6)
+        .frame(width: 244)
         .foregroundStyle(PlainwordTheme.textPrimary)
-        .background(PlainwordTheme.surface)
+        .background(PlainwordTheme.raisedSurface)
     }
 
     private var listeningBinding: Binding<Bool> {
@@ -165,23 +155,85 @@ private struct PlainwordMenuView: View {
         )
     }
 
-    private func menuButton(
-        _ title: String,
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        MenuActionButton(
-            title: title,
-            systemImage: systemImage,
-            action: action
-        )
-    }
-
     private var menuDivider: some View {
         Rectangle()
-            .fill(PlainwordTheme.separator.opacity(0.8))
+            .fill(PlainwordTheme.strongSeparator)
             .frame(height: 1)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+    }
+}
+
+/// A row of the dropdown that carries a control rather than an action.
+private struct MenuRow<Accessory: View>: View {
+    let title: String
+    var isEmphasized = false
+    @ViewBuilder let accessory: Accessory
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(PlainwordFont.ui(12.5, weight: isEmphasized ? .bold : .regular))
+            Spacer(minLength: 8)
+            accessory
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+    }
+}
+
+private struct MenuActionButton: View {
+    let title: String
+    var shortcut: String?
+    var icon: NSImage?
+    var isChecked = false
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if let icon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 16, height: 16)
+                        .accessibilityHidden(true)
+                }
+                Text(title)
+                    .font(PlainwordFont.ui(12.5))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if isChecked {
+                    Image(systemName: "checkmark")
+                        .font(PlainwordFont.ui(10, weight: .bold))
+                        .foregroundStyle(PlainwordTheme.accent)
+                }
+                if let shortcut {
+                    Text(shortcut)
+                        .font(PlainwordFont.mono(11))
+                        .foregroundStyle(PlainwordTheme.textTertiary)
+                }
+            }
+            .foregroundStyle(
+                isHovering ? PlainwordTheme.textPrimary : PlainwordTheme.textSecondary
+            )
+            .contentShape(Rectangle())
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                isHovering ? PlainwordTheme.fieldSurface : .clear,
+                in: RoundedRectangle(
+                    cornerRadius: PlainwordTheme.pillCornerRadius,
+                    style: .continuous
+                )
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .animation(PlainwordMotion.content, value: isHovering)
     }
 }
 
@@ -192,6 +244,10 @@ private final class StatusBarController: NSObject, ObservableObject {
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
     private weak var mainWindow: NSWindow?
+    private var cancellables: Set<AnyCancellable> = []
+    private var glyphActivity: PlainwordMenuBarGlyph.Activity = .idle
+    /// Drives the amber full stop while a request is in flight.
+    private var pulseTask: Task<Void, Never>?
 
     init(
         settings: SettingsStore,
@@ -204,6 +260,11 @@ private final class StatusBarController: NSObject, ObservableObject {
 
         configureStatusItem()
         configurePopover()
+        observeActivity()
+    }
+
+    deinit {
+        pulseTask?.cancel()
     }
 
     func registerMainWindow(_ window: NSWindow?) {
@@ -211,14 +272,67 @@ private final class StatusBarController: NSObject, ObservableObject {
         guard window !== mainWindow else { return }
         mainWindow = window
         window.isReleasedWhenClosed = false
+        // The sidebar runs to the top of the window, with the traffic lights over it.
         window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.styleMask.insert(.fullSizeContentView)
         window.toolbarStyle = .unified
-        window.backgroundColor = NSColor(PlainwordTheme.canvas)
+        window.backgroundColor = NSColor(PlainwordTheme.surface)
+    }
+
+    /// The glyph is the only place the app's state is shown when its windows are
+    /// closed, so it is rebuilt whenever that state moves.
+    private func observeActivity() {
+        crossAppCorrections.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.refreshStatusItem()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func refreshStatusItem() {
+        let activity = currentGlyphActivity
+        guard activity != glyphActivity else { return }
+        glyphActivity = activity
+        pulseTask?.cancel()
+        pulseTask = nil
+        setStatusItemImage(activity: activity, stopOpacity: 1)
+
+        guard activity == .working, !PlainwordMotion.reducesMotion else { return }
+        pulseTask = Task { [weak self] in
+            var isDim = false
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(550))
+                guard !Task.isCancelled else { return }
+                isDim.toggle()
+                self?.setStatusItemImage(activity: .working, stopOpacity: isDim ? 0.3 : 1)
+            }
+        }
+    }
+
+    private var currentGlyphActivity: PlainwordMenuBarGlyph.Activity {
+        guard crossAppCorrections.isListeningEnabled,
+              !crossAppCorrections.isActiveApplicationExcluded else {
+            return .paused
+        }
+        if case .correcting = crossAppCorrections.activity { return .working }
+        return .idle
+    }
+
+    private func setStatusItemImage(
+        activity: PlainwordMenuBarGlyph.Activity,
+        stopOpacity: CGFloat
+    ) {
+        statusItem.button?.image = PlainwordMenuBarGlyph.image(
+            activity: activity,
+            stopOpacity: stopOpacity
+        )
     }
 
     private func configureStatusItem() {
         guard let button = statusItem.button else { return }
-        button.image = PlainwordMenuBarGlyph.image()
+        button.image = PlainwordMenuBarGlyph.image(activity: currentGlyphActivity)
         button.imageScaling = .scaleProportionallyDown
         button.toolTip = "Plainword"
         button.target = self
@@ -331,7 +445,7 @@ private final class StatusBarController: NSObject, ObservableObject {
             action: #selector(toggleSuggestionsFromContextMenu),
             keyEquivalent: ""
         )
-        suggestionsItem.image = PlainwordMenuBarGlyph.image(size: 16)
+        suggestionsItem.image = PlainwordMenuBarGlyph.menuItemImage()
         suggestionsItem.state = crossAppCorrections.isListeningEnabled ? .on : .off
         suggestionsItem.target = self
         menu.addItem(suggestionsItem)
@@ -409,84 +523,5 @@ private final class WindowReadingView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         onWindowChange?(window)
-    }
-}
-
-private struct ApplicationMenuActionButton: View {
-    let title: String
-    let icon: NSImage?
-    let isExcluded: Bool
-    let action: () -> Void
-
-    @State private var isHovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 9) {
-                Group {
-                    if let icon {
-                        Image(nsImage: icon)
-                            .resizable()
-                            .scaledToFit()
-                    } else {
-                        Image(systemName: "app")
-                    }
-                }
-                .frame(width: 17, height: 17)
-
-                Text(title)
-                    .lineLimit(1)
-                Spacer()
-                if isExcluded {
-                    Image(systemName: "checkmark")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(PlainwordTheme.accent)
-                }
-            }
-            .contentShape(Rectangle())
-            .padding(.horizontal, 9)
-            .padding(.vertical, 7)
-            .background {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isHovering ? PlainwordTheme.hoverSurface : .clear)
-            }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1)
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .animation(.easeOut(duration: 0.1), value: isHovering)
-    }
-}
-
-private struct MenuActionButton: View {
-    let title: String
-    let systemImage: String
-    let action: () -> Void
-
-    @State private var isHovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 9) {
-                Image(systemName: systemImage)
-                    .foregroundStyle(PlainwordTheme.textSecondary)
-                    .frame(width: 17)
-                Text(title)
-                Spacer()
-            }
-            .contentShape(Rectangle())
-            .padding(.horizontal, 9)
-            .padding(.vertical, 7)
-            .background {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isHovering ? PlainwordTheme.hoverSurface : .clear)
-            }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1)
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .animation(.easeOut(duration: 0.1), value: isHovering)
     }
 }

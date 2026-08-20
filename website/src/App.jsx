@@ -1,6 +1,7 @@
 import Backdrop from './components/Backdrop.jsx';
 import Nav from './components/Nav.jsx';
 import Hero from './components/Hero.jsx';
+import Demo from './components/Demo.jsx';
 import Features from './components/Features.jsx';
 import VoiceSection from './components/VoiceSection.jsx';
 import ContextSection from './components/ContextSection.jsx';
@@ -16,6 +17,7 @@ export default function App() {
       <Nav />
       <main className="relative">
         <Hero />
+        <Demo />
         <Features />
         <VoiceSection />
         <ContextSection />

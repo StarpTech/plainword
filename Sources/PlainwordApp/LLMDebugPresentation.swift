@@ -15,20 +15,29 @@ extension LLMDebugLogEntry {
         }
     }
 
-    /// Status is also carried by a symbol, so it never depends on colour alone.
-    var statusSymbol: String {
+    /// Status is also carried by a mark, so it never depends on colour alone.
+    var statusMark: String {
         switch state {
-        case .inProgress: "arrow.up.circle"
-        case .succeeded: "checkmark.circle.fill"
-        case .failed: "exclamationmark.triangle.fill"
+        case .inProgress: "\u{2191}"
+        case .succeeded: "\u{2713}"
+        case .failed: "\u{25B3}"
         }
     }
 
     var statusColor: Color {
         switch state {
-        case .inProgress: PlainwordTheme.accent
-        case .succeeded: PlainwordTheme.success
+        case .inProgress: PlainwordTheme.textSecondary
+        case .succeeded: PlainwordTheme.accent
         case .failed: PlainwordTheme.danger
+        }
+    }
+
+    /// The wash the capsule sits on, matched to the colour it carries.
+    var statusWash: Color {
+        switch state {
+        case .inProgress: PlainwordTheme.fieldSurface
+        case .succeeded: PlainwordTheme.accentMuted
+        case .failed: PlainwordTheme.dangerMuted
         }
     }
 
@@ -204,21 +213,20 @@ func prettyPrintedJSON(_ value: String) -> String {
     return String(decoding: formatted, as: UTF8.self)
 }
 
-/// A capsule that states the outcome in words and a symbol, not just a colour.
+/// A capsule that states the outcome in words and a mark, not just a colour.
 struct LLMCallStatusBadge: View {
     let entry: LLMDebugLogEntry
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: entry.statusSymbol)
-                .font(.system(size: 9, weight: .bold))
+            Text(entry.statusMark)
             Text(entry.statusTitle)
-                .font(.system(size: 10, weight: .semibold))
         }
+        .font(PlainwordFont.ui(10, weight: .bold))
         .foregroundStyle(entry.statusColor)
-        .padding(.horizontal, 7)
+        .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .background(entry.statusColor.opacity(0.12), in: Capsule())
+        .background(entry.statusWash, in: Capsule())
         .accessibilityElement()
         .accessibilityLabel(entry.statusDescription)
     }

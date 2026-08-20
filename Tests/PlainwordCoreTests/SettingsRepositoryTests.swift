@@ -95,7 +95,7 @@ final class SettingsRepositoryTests: XCTestCase {
         XCTAssertEqual(repository.profile.style, .formal)
         XCTAssertEqual(repository.llmSettings.provider, .openAICompatible)
         XCTAssertEqual(repository.llmSettings.authentication, .none)
-        XCTAssertEqual(repository.llmSettings.thinkingMode, .low)
+        XCTAssertEqual(repository.llmSettings.thinkingMode, .off)
         XCTAssertEqual(repository.spellingLanguageSettings.mode, .automatic)
         XCTAssertEqual(repository.spellingLanguageSettings.fixedLanguageIdentifier, "fr")
     }

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Plainword — README banner</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400..700&family=Nunito+Sans:opsz,wght@6..12,400..800&family=Fragment+Mono&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="ink.css" />
+    <style>
+      body { width: 1280px; height: 440px; }
+
+      .card {
+        position: relative;
+        width: 1280px;
+        height: 440px;
+        padding: 54px 68px;
+        display: flex;
+        align-items: center;
+        gap: 52px;
+        background:
+          radial-gradient(900px 620px at 88% -12%, rgb(51 104 76 / 0.13), transparent 62%),
+          radial-gradient(700px 520px at 4% 108%, rgb(51 104 76 / 0.07), transparent 60%),
+          linear-gradient(158deg, #f4efe4 0%, var(--pw-canvas) 46%, #e9e2d3 100%);
+      }
+
+      .copy { width: 600px; flex: none; }
+
+      .brand { display: flex; align-items: center; gap: 13px; margin-bottom: 26px; }
+      .brand img { width: 44px; height: 44px; border-radius: 10px; }
+      .brand b { font-family: var(--serif); font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
+      .brand span {
+        font-family: var(--mono);
+        font-size: 12px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--pw-ink-faint);
+        border-left: 1px solid var(--pw-line-strong);
+        padding-left: 13px;
+        margin-left: 3px;
+      }
+
+      h1 {
+        font-family: var(--serif);
+        font-size: 54px;
+        font-weight: 600;
+        line-height: 1.08;
+        letter-spacing: -0.022em;
+        margin-bottom: 20px;
+      }
+      h1 em { font-style: normal; color: var(--pw-accent); }
+
+      p.lead {
+        font-size: 20px;
+        line-height: 1.5;
+        color: var(--pw-ink-soft);
+        max-width: 540px;
+        margin-bottom: 30px;
+      }
+
+      .meta { display: flex; align-items: center; gap: 10px; }
+      kbd {
+        font-family: var(--mono);
+        font-size: 14px;
+        color: var(--pw-ink);
+        background: var(--pw-surface);
+        border: 1px solid var(--pw-line-strong);
+        border-radius: 7px;
+        padding: 6px 11px;
+        box-shadow: 0 1px 0 rgb(72 56 28 / 0.06);
+      }
+      .meta span { font-family: var(--mono); font-size: 13px; color: var(--pw-ink-soft); }
+      .meta .sep { color: var(--pw-line-strong); }
+
+      /* Right — one sentence, marked up the way the panel marks it. */
+      .sheet {
+        flex: 1;
+        background: var(--pw-surface);
+        border: 1px solid var(--pw-line-strong);
+        border-radius: 13px;
+        padding: 24px 26px 20px;
+        box-shadow: 0 3px 8px rgb(72 56 28 / 0.08), 0 18px 44px rgb(72 56 28 / 0.16);
+      }
+      .sheet .label { display: block; margin-bottom: 12px; }
+      .sheet .prose { font-size: 25px; line-height: 1.55; }
+      .sheet .rule { height: 1px; background: var(--pw-line); margin: 20px 0 13px; }
+      .sheet .receipt {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--pw-ink-faint);
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        white-space: nowrap;
+      }
+      .sheet .receipt b { color: var(--pw-accent); font-weight: 400; }
+    </style>
+  </head>
+  <body>
+    <div class="card edge">
+      <div class="copy">
+        <div class="brand">
+          <img src="assets/app-icon.png" alt="" />
+          <b>Plainword</b>
+          <span>for macOS</span>
+        </div>
+
+        <h1>Say what you mean,<br />wherever you write<em>.</em></h1>
+
+        <p class="lead">
+          Correct, rewrite and transform text right where you type it — in your tone,
+          on the model you choose, with the writing around your cursor for context.
+        </p>
+
+        <div class="meta">
+          <kbd>⌘F2</kbd><span>review</span>
+          <span class="sep">·</span>
+          <kbd>⇧⌘F2</kbd><span>transform</span>
+        </div>
+      </div>
+
+      <div class="sheet">
+        <span class="label">Proposed edit</span>
+        <div class="prose">
+          I <span class="r">beleive</span> <span class="i">believe</span>
+          <span class="r">the the</span> <span class="i">the</span> report is finished, and I
+          will send it <span class="r">tomorow</span> <span class="i">tomorrow</span> morning.
+        </div>
+        <div class="rule"></div>
+        <div class="receipt">
+          <span>3 fixes</span><span>·</span><span>Mail</span><span>·</span><b>local model</b>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

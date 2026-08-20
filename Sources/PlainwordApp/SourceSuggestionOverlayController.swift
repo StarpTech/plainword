@@ -154,26 +154,14 @@ private final class SourceSuggestionOverlayView: NSView {
         line.stroke()
     }
 
-    private static let dangerColor = adaptiveColor(
-        light: 0xC83945,
-        dark: 0xFF7D88
+    /// The editor's own marks: red pencil for what goes, green ink for what is
+    /// being rewritten.
+    private static let dangerColor = PlainwordTheme.adaptiveNSColor(
+        light: 0xA6453E,
+        dark: 0xD08B80
     )
-    private static let rewriteColor = adaptiveColor(
-        light: 0x99601D,
-        dark: 0xEDB864
+    private static let rewriteColor = PlainwordTheme.adaptiveNSColor(
+        light: 0x33684C,
+        dark: 0x8CBD9B
     )
-
-    private static func adaptiveColor(light: UInt32, dark: UInt32) -> NSColor {
-        NSColor(name: nil) { appearance in
-            let value = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                ? dark
-                : light
-            return NSColor(
-                calibratedRed: CGFloat((value >> 16) & 0xFF) / 255,
-                green: CGFloat((value >> 8) & 0xFF) / 255,
-                blue: CGFloat(value & 0xFF) / 255,
-                alpha: 1
-            )
-        }
-    }
 }
