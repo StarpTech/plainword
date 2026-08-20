@@ -60,6 +60,17 @@ final class AccessibilityChangeObserver {
         let source = AXObserverGetRunLoopSource(observer)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
 
+        // Electron documents this opt-in for third-party assistive software, and other
+        // applications reject the unknown attribute without changing state. Set once on
+        // activation rather than only when focus cannot be resolved: an Electron app can
+        // answer with a partial tree instead of none, which looks like success and then
+        // yields nothing worth reading.
+        _ = AXUIElementSetAttributeValue(
+            applicationElement,
+            "AXManualAccessibility" as CFString,
+            kCFBooleanTrue
+        )
+
         addNotification(kAXFocusedUIElementChangedNotification, to: applicationElement)
         addNotification(kAXUIElementDestroyedNotification, to: applicationElement)
         rebindFocusedElement()
@@ -139,8 +150,8 @@ final class AccessibilityChangeObserver {
 
         var element = focusedElement(from: applicationElement)
         if element == nil {
-            // Electron documents this opt-in for third-party assistive software. Other
-            // applications simply reject the unknown attribute without changing state.
+            // A second attempt after re-asserting the opt-in, for an application that
+            // was still building its tree when this observer started.
             _ = AXUIElementSetAttributeValue(
                 applicationElement,
                 "AXManualAccessibility" as CFString,

@@ -12,11 +12,11 @@ struct WritingSettingsView: View {
             )
 
             SettingsSection("Voice") {
-                // Five tones do not fit beside their own name, so the choice takes the
-                // full width of the card rather than being squeezed against the label.
-                SettingsStackedRow(
+                // Three choices fit beside their own name, so these read like every
+                // other settings row rather than stacking under a full-width control.
+                SettingsRow(
                     "Tone",
-                    detail: "The emotional character of suggestions."
+                    detail: "How suggestions come across to the reader."
                 ) {
                     PlainwordSegmentedControl(
                         segments: Tone.allCases.map { PlainwordSegment($0, $0.displayName) },
@@ -27,9 +27,9 @@ struct WritingSettingsView: View {
 
                 SettingsDivider()
 
-                SettingsStackedRow(
+                SettingsRow(
                     "Style",
-                    detail: "How suggestions are phrased and structured."
+                    detail: "How much a suggestion says."
                 ) {
                     PlainwordSegmentedControl(
                         segments: WritingStyle.allCases.map {

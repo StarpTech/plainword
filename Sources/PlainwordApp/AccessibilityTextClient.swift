@@ -85,7 +85,6 @@ final class AccessibilityTextClient {
     private let maximumAutomaticContextLength = 800
     private let maximumSelectionLength = 1_600
     private let maximumManualReviewLength = 6_000
-    private let maximumSurroundingContextLength = 240
     private let maximumCompleteTextReadLength = 12_000
     private let maximumRangeWindowLength = 2_400
     /// Ceiling on how long a prompt may be before an equal value stops reading as an
@@ -124,7 +123,7 @@ final class AccessibilityTextClient {
         let selectedRange: CFRange
     }
 
-    private let contextHarvester = ReadOnlyContextHarvester()
+    private let contextService = ContextService()
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "com.example.Plainword",
         category: "AccessibilityTextClient"
@@ -210,10 +209,9 @@ final class AccessibilityTextClient {
                     selectedRange: selectedRange,
                     scope: scope
                 ),
-                maximumSurroundingContextUTF16Length: scope == .sentence
-                    || selectedRange.length > 0
-                    ? maximumSurroundingContextLength
-                    : 0
+                surrounding: scope == .sentence || selectedRange.length > 0
+                    ? .modest
+                    : .identityOnly
               ),
               let fieldContext = localFieldContext.translated(
                 byUTF16Offset: textState.range.location
@@ -323,32 +321,90 @@ final class AccessibilityTextClient {
     func enriched(_ snapshot: FocusedTextSnapshot) async -> FocusedTextSnapshot {
         guard isTrusted else { return snapshot }
 
-        let result = await contextHarvester.fragments(
-            around: AXElementBox(snapshot.element),
-            excluding: [
-                snapshot.fullText,
-                snapshot.context.text,
-                snapshot.applicationName
-            ],
-            targetUTF16Length: snapshot.context.utf16Length,
-            primaryScreenMaxY: primaryScreenMaxY
-        )
-        if result.telemetry.wasTruncated {
-            logger.debug(
-                """
-                Read-only context truncated after \(result.telemetry.nodesExamined, privacy: .public) \
-                nodes in \(Int(result.telemetry.durationSeconds * 1_000), privacy: .public) ms \
-                (node limit: \(result.telemetry.reachedNodeLimit, privacy: .public), \
-                time limit: \(result.telemetry.reachedTimeLimit, privacy: .public))
-                """
-            )
-        }
-        guard !result.fragments.isEmpty else { return snapshot }
+        let assembly = await contextService.assembly(for: contextRequest(for: snapshot))
+        guard !assembly.fragments.isEmpty else { return snapshot }
 
         return snapshot.withContext(
             snapshot.context.withApplicationContext(
-                snapshot.context.applicationContextFragments + result.fragments
+                snapshot.context.applicationContextFragments + assembly.fragments
             )
+        )
+    }
+
+    /// Reads the surroundings of whatever is focused now, before anything has been asked
+    /// of them.
+    ///
+    /// Called when focus lands rather than when the author invokes a shortcut, which is
+    /// the whole reason the harvest can afford to look further than it used to: the
+    /// budget stops being the pause the author would otherwise sit through.
+    func prewarmContext(
+        applicationName: String,
+        bundleIdentifier: String?
+    ) async {
+        guard isTrusted, let focused = focusedEditableElement() else { return }
+        let request = ContextService.Request(
+            element: AXElementBox(focused.element),
+            processIdentifier: focused.processIdentifier,
+            bundleIdentifier: bundleIdentifier,
+            applicationName: applicationName,
+            // Harvested for the most demanding case on purpose. A draft needs the most
+            // prose before it is satisfied, so a prefetch taken for one also answers the
+            // correction or rewrite that actually turns up — where reading for the
+            // lesser case would leave the greater one to start again.
+            targetKind: .insertionPoint,
+            // What the field already holds, so the harvest can stop where the author's
+            // own writing begins. A prefetch that believed the field were empty would
+            // read straight through it and hand the writing back as if the interface
+            // had said it — and would go on doing so after the text had been replaced.
+            // One attribute read against the several hundred about to be spent.
+            capturedText: stringAttribute(kAXValueAttribute as String, from: focused.element)
+                ?? "",
+            targetRange: NSRange(location: 0, length: 0),
+            primaryScreenMaxY: primaryScreenMaxY
+        )
+        await contextService.prewarm(request)
+    }
+
+    /// Forgets what was learned about an application's screen, because it has moved on.
+    func invalidateContext(processIdentifier: pid_t? = nil) async {
+        await contextService.invalidate(processIdentifier: processIdentifier)
+    }
+
+    /// Records the tree behind whatever is focused right now, for replaying offline.
+    ///
+    /// The pipeline is run for real against the live application while a recorder watches
+    /// it, so the fixture answers exactly the questions the sources ask — including the
+    /// marker reads, whose parameters could not be enumerated any other way.
+    func recordFocusedTree(scenario: String) -> AXFixtureCapture.Result? {
+        guard isTrusted, let focused = focusedEditableElement() else { return nil }
+        let application = NSRunningApplication(processIdentifier: focused.processIdentifier)
+        let snapshot = captureFocusedText(scope: .sentence)
+            ?? captureFocusedInsertionPoint()
+        return AXFixtureCapture.recordFocusedTree(
+            element: focused.element,
+            applicationName: application?.localizedName ?? "Another app",
+            bundleIdentifier: application?.bundleIdentifier,
+            targetKind: snapshot?.context.targetKind ?? .insertionPoint,
+            scenario: scenario,
+            primaryScreenMaxY: primaryScreenMaxY
+        )
+    }
+
+    private func contextRequest(
+        for snapshot: FocusedTextSnapshot
+    ) -> ContextService.Request {
+        ContextService.Request(
+            element: AXElementBox(snapshot.element),
+            processIdentifier: snapshot.processIdentifier,
+            bundleIdentifier: snapshot.applicationIdentifier,
+            applicationName: snapshot.applicationName,
+            targetKind: snapshot.context.targetKind,
+            capturedText: snapshot.fullText,
+            targetRange: NSRange(
+                location: snapshot.context.utf16Location - snapshot.capturedTextRange.location,
+                length: snapshot.context.utf16Length
+            ),
+            primaryScreenMaxY: primaryScreenMaxY
         )
     }
 

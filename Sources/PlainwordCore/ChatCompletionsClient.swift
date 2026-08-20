@@ -711,8 +711,8 @@ public struct ChatCompletionsClient: Sendable {
         You are a writing editor. Revise only <text_to_edit> so it is correct, fluent, idiomatic, and recognizably the author's.
 
         Priorities, in order:
-        1. Preserve the author's intended meaning, facts, level of certainty, point of view, language, emotional character, and natural voice.
-        2. Fix spelling, grammar, and punctuation.
+        1. Preserve the author's intended meaning, facts, level of certainty, point of view, language, and emotional character.
+        2. Fix spelling, grammar, and punctuation. Do this in casual, slang, lowercase, and fragmentary text too: informality is voice, a misspelled word is not. Keep a non-standard spelling only when it is an established informal form ("gonna", "kinda", "ur", "sup", "lol") or clearly deliberate; a mistyped word such as "whazts" is an error and gets fixed.
         3. Improve wording only when it is clearly awkward, literal, wordy, repetitive, or non-idiomatic. For English, use natural contemporary phrasing. Avoid generic, corporate, over-polished, or AI-sounding prose.
         4. Apply the author preferences only when they do not conflict with priority 1.
         5. Make the smallest useful edit. Rewrite a sentence only when a focused edit cannot express the same meaning naturally. If the text is already natural, return it unchanged.
@@ -743,8 +743,8 @@ public struct ChatCompletionsClient: Sendable {
         )
         let userMessage = """
         <author_preferences>
-        Tone: \(profile.tone.rawValue)
-        Writing style: \(profile.style.rawValue)
+        Tone: \(profile.tone.promptDescription)
+        Writing style: \(profile.style.promptDescription)
         Language hint: \(locale) (regional spelling guidance only; never a translation instruction)
         </author_preferences>\(additionalAuthorInstructionsBlock(profile.promptExtension))
         \(contextBlocks)
@@ -807,8 +807,8 @@ public struct ChatCompletionsClient: Sendable {
         )
         let userMessage = """
         <author_preferences>
-        Tone: \(profile.tone.rawValue)
-        Writing style: \(profile.style.rawValue)
+        Tone: \(profile.tone.promptDescription)
+        Writing style: \(profile.style.promptDescription)
         Language hint: \(locale) (regional spelling guidance only; never a translation instruction)
         </author_preferences>\(additionalAuthorInstructionsBlock(promptExtension))
 

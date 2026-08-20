@@ -115,6 +115,25 @@ final class ChatCompletionsClientTests: XCTestCase {
         )
     }
 
+    func testSendsMinimalReasoningEffortForModelsWithoutNoneSupport() throws {
+        let request = try ChatCompletionsClient().makeRequest(
+            text: "hello",
+            profile: WritingProfile(),
+            locale: "en-US",
+            settings: LLMSettings(
+                endpoint: "https://example.com/v1/chat/completions",
+                model: "gpt-5-nano-2025-08-07",
+                authentication: .bearer,
+                thinkingMode: .minimal
+            ),
+            apiKey: "test-key"
+        )
+
+        let body = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["reasoning_effort"] as? String, "minimal")
+    }
+
     func testBuildsOllamaRequestWithSelectedModelAndThinkingMode() throws {
         let request = try ChatCompletionsClient().makeRequest(
             text: "hello",
@@ -666,6 +685,22 @@ final class ChatCompletionsClientTests: XCTestCase {
         XCTAssertTrue(instructions.contains("If meaning or a relationship remains uncertain"))
     }
 
+    func testEditingPromptFixesMisspellingsInCasualText() {
+        let messages = ChatCompletionsClient.messages(
+            text: "hey whazts up",
+            profile: WritingProfile(),
+            locale: "en-US"
+        )
+
+        let instructions = messages[0].content
+        XCTAssertTrue(instructions.contains("Do this in casual, slang, lowercase, and fragmentary text too"))
+        XCTAssertTrue(instructions.contains("informality is voice, a misspelled word is not"))
+        XCTAssertTrue(instructions.contains("established informal form"))
+        // Voice preservation outranks spelling, so it must not name the phrasing
+        // itself; otherwise a slangy fragment reads as deliberate style.
+        XCTAssertFalse(instructions.contains("natural voice"))
+    }
+
     func testEditingPromptOmitsEmptyReadOnlyContextBlocks() {
         let messages = ChatCompletionsClient.messages(
             text: "Hello.",
@@ -837,6 +872,64 @@ final class ChatCompletionsClientTests: XCTestCase {
         ))
         XCTAssertFalse(messages[0].content.contains("Make the smallest useful edit"))
         XCTAssertFalse(messages[0].content.contains("Do not rewrite text"))
+    }
+
+    func testDefaultProfileAsksTheModelToKeepTheAuthorsToneAndStyle() {
+        // The default preference has to reach the model as an instruction. A bare
+        // value name would read as no preference at all, and the model would settle
+        // into a voice of its own — the thing this default exists to prevent.
+        let profile = WritingProfile()
+        XCTAssertEqual(profile.tone, .keepMine)
+        XCTAssertEqual(profile.style, .keepMine)
+
+        let editing = ChatCompletionsClient.messages(
+            text: "we shipped it friday and it went fine",
+            profile: profile,
+            locale: "en-US"
+        )
+        XCTAssertTrue(editing[1].content.contains(
+            "Tone: the author's own — match the tone of their existing writing, and never "
+                + "trade it for a smoother, warmer, or more neutral one\n"
+        ))
+        XCTAssertTrue(editing[1].content.contains(
+            "Writing style: the author's own — keep the wording, rhythm, and sentence "
+                + "structure they already use, and leave phrasing that is already fine alone\n"
+        ))
+        XCTAssertFalse(editing[1].content.contains("Tone: keepMine"))
+        XCTAssertFalse(editing[1].content.contains("Writing style: keepMine"))
+
+        // Composition writes from scratch, so it carries the same preference for the
+        // author's voice rather than a preset one.
+        let composing = ChatCompletionsClient.messages(
+            text: "",
+            applicationContext: "Chat with Ana about Friday.",
+            instruction: "a short reply saying I am running late",
+            intent: .compose,
+            profile: profile,
+            locale: "en-US"
+        )
+        XCTAssertTrue(composing[1].content.contains(
+            "Tone: the author's own — match the tone of their existing writing, and never "
+                + "trade it for a smoother, warmer, or more neutral one\n"
+        ))
+        XCTAssertTrue(composing[1].content.contains(
+            "Writing style: the author's own — keep the wording, rhythm, and sentence "
+                + "structure they already use, and leave phrasing that is already fine alone\n"
+        ))
+    }
+
+    func testDetailedStyleIsBoundedSoItCannotPadEveryEdit() {
+        let messages = ChatCompletionsClient.messages(
+            text: "shipped friday",
+            profile: WritingProfile(tone: .professional, style: .detailed),
+            locale: "en-US"
+        )
+
+        XCTAssertTrue(messages[1].content.contains("Tone: professional\n"))
+        XCTAssertTrue(messages[1].content.contains(
+            "Writing style: detailed — spell out what the author left implicit, but "
+                + "never pad, and never add a fact they did not give\n"
+        ))
     }
 
     func testComposePromptWritesNewTextWithoutAnEditTarget() {

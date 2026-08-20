@@ -1,27 +1,87 @@
 import Foundation
 
+/// How a suggestion should come across to the reader.
+///
+/// Deliberately short. A tone set here is a *standing* preference applied to every
+/// edit, so anything wanted on one message and not the next — persuasive, empathetic,
+/// confident — belongs in Transform…, where it is asked for by name. What is left is
+/// the pair people genuinely switch between: writing to a person, and writing to work.
 public enum Tone: String, CaseIterable, Codable, Identifiable, Sendable {
-    case neutral
+    /// The default. The other cases ask for a character the author did not write,
+    /// which is right only when it was actually wanted; this one asks for theirs.
+    /// It also replaces the old `neutral`, which said the same thing by saying nothing.
+    case keepMine
     case friendly
-    case confident
-    case empathetic
     case professional
 
     public var id: String { rawValue }
 
-    public var displayName: String { rawValue.capitalized }
+    public var displayName: String {
+        switch self {
+        case .keepMine: "Keep mine"
+        default: rawValue.capitalized
+        }
+    }
+
+    /// What the preference contributes to the prompt. A preset needs no gloss — the
+    /// model already knows what "friendly" asks for — but a bare `keepMine` reads as
+    /// no preference at all, which leaves the model free to settle into a voice of its
+    /// own. So it states the instruction instead of naming a value.
+    var promptDescription: String {
+        switch self {
+        case .keepMine:
+            """
+            the author's own — match the tone of their existing writing, and never \
+            trade it for a smoother, warmer, or more neutral one
+            """
+        default:
+            rawValue
+        }
+    }
 }
 
+/// How much a suggestion says.
+///
+/// Kept on its own axis. `formal` and `conversational` used to live here and merely
+/// restated `professional` and `friendly` one row above, so a prompt carrying both
+/// could not say which was meant to win. Length is the preference that is actually
+/// independent of tone.
 public enum WritingStyle: String, CaseIterable, Codable, Identifiable, Sendable {
-    case clear
+    /// The default, for the same reason as `Tone.keepMine`. It also replaces the old
+    /// `clear`, which asked for something the editor prompt already requires of every
+    /// suggestion.
+    case keepMine
     case concise
-    case conversational
-    case formal
-    case persuasive
+    case detailed
 
     public var id: String { rawValue }
 
-    public var displayName: String { rawValue.capitalized }
+    public var displayName: String {
+        switch self {
+        case .keepMine: "Keep mine"
+        default: rawValue.capitalized
+        }
+    }
+
+    /// See `Tone.promptDescription`. `detailed` is bounded because the editor prompt
+    /// asks for the smallest useful edit: read bare, it invites the model to pad every
+    /// sentence it touches, which is the one way this preference could do harm.
+    var promptDescription: String {
+        switch self {
+        case .keepMine:
+            """
+            the author's own — keep the wording, rhythm, and sentence structure they \
+            already use, and leave phrasing that is already fine alone
+            """
+        case .detailed:
+            """
+            detailed — spell out what the author left implicit, but never pad, and \
+            never add a fact they did not give
+            """
+        case .concise:
+            rawValue
+        }
+    }
 }
 
 public struct WritingProfile: Codable, Equatable, Sendable {
@@ -30,8 +90,8 @@ public struct WritingProfile: Codable, Equatable, Sendable {
     public var promptExtension: String
 
     public init(
-        tone: Tone = .neutral,
-        style: WritingStyle = .clear,
+        tone: Tone = .keepMine,
+        style: WritingStyle = .keepMine,
         promptExtension: String = ""
     ) {
         self.tone = tone
@@ -96,6 +156,7 @@ public enum LLMProvider: String, CaseIterable, Codable, Identifiable, Sendable {
 
 public enum ThinkingMode: String, CaseIterable, Codable, Identifiable, Sendable {
     case off = "none"
+    case minimal
     case low
     case medium
     case high
@@ -105,6 +166,7 @@ public enum ThinkingMode: String, CaseIterable, Codable, Identifiable, Sendable 
     public var displayName: String {
         switch self {
         case .off: "Off"
+        case .minimal: "Minimal"
         case .low: "Low"
         case .medium: "Medium"
         case .high: "High"

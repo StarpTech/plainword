@@ -3,6 +3,13 @@ import XCTest
 @testable import PlainwordCore
 
 final class TextEditContextTests: XCTestCase {
+    /// Drops the elision marker so an assertion can measure the writing on its own.
+    private func stripped(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: ReadOnlyContextRanker.elisionMarker, with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     func testSelectionTakesPriority() {
         let text = "First paragraph.\nSecond paragraph."
         let range = (text as NSString).range(of: "Second")
@@ -351,27 +358,34 @@ final class TextEditContextTests: XCTestCase {
                 from: text,
                 selectedRange: NSRange(location: caret, length: 0),
                 maximumUTF16Length: 100,
-                maximumSurroundingContextUTF16Length: 6
+                surrounding: ContextNeed(
+                    leading: PassageBudget(maximumUTF16Length: 6),
+                    trailing: PassageBudget(maximumUTF16Length: 6)
+                )
             )
         )
 
-        XCTAssertLessThanOrEqual((context.leadingContext as NSString).length, 6)
-        XCTAssertLessThanOrEqual((context.trailingContext as NSString).length, 6)
+        // The elision marker is added on top of the budget, which bounds the writing
+        // itself rather than the note saying writing was left out.
+        XCTAssertLessThanOrEqual((stripped(context.leadingContext) as NSString).length, 6)
+        XCTAssertLessThanOrEqual((stripped(context.trailingContext) as NSString).length, 6)
     }
 
-    func testSentenceContextIncludesOnlyTheNearestAdjacentSentences() throws {
+    /// The neighbour count used to bind long before the character budget did, which cost
+    /// a request every sentence but one on each side.
+    func testSentenceContextSpendsItsBudgetRatherThanCountingNeighbours() throws {
         let text = "First. Second. Third. Target sentence. Fourth. Fifth. Sixth."
         let caret = (text as NSString).range(of: "Target").location
         let context = try XCTUnwrap(
             TextEditContextExtractor.extract(
                 from: text,
                 selectedRange: NSRange(location: caret, length: 0),
-                maximumSurroundingContextUTF16Length: 200
+                surrounding: .modest
             )
         )
 
-        XCTAssertEqual(context.leadingContext, "Third.")
-        XCTAssertEqual(context.trailingContext, "Fourth.")
+        XCTAssertEqual(context.leadingContext, "First. Second. Third.")
+        XCTAssertEqual(context.trailingContext, "Fourth. Fifth. Sixth.")
     }
 
     func testLongSelectionKeepsItsIndependentReadOnlyContextBudget() throws {
@@ -382,7 +396,7 @@ final class TextEditContextTests: XCTestCase {
                 from: text,
                 selectedRange: selection,
                 maximumUTF16Length: selection.length,
-                maximumSurroundingContextUTF16Length: 100
+                surrounding: .modest
             )
         )
 

@@ -31,7 +31,7 @@ final class SettingsRepositoryTests: XCTestCase {
         let repository = SettingsRepository(suiteName: suiteName)
         repository.profile = WritingProfile(
             tone: .friendly,
-            style: .conversational,
+            style: .concise,
             promptExtension: "Prefer British English."
         )
         repository.llmSettings = LLMSettings(
@@ -53,7 +53,7 @@ final class SettingsRepositoryTests: XCTestCase {
             reloaded.profile,
             WritingProfile(
                 tone: .friendly,
-                style: .conversational,
+                style: .concise,
                 promptExtension: "Prefer British English."
             )
         )
@@ -79,10 +79,24 @@ final class SettingsRepositoryTests: XCTestCase {
         )
     }
 
+    func testRetiredToneAndStyleValuesFallBackToKeepingTheAuthorsVoice() throws {
+        // The presets these replaced are still sitting in the defaults of anyone who
+        // picked one. Landing on `keepMine` is the right answer for them: it is the
+        // one value that cannot be wrong about how they write.
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.set("empathetic", forKey: "writingProfile.tone")
+        defaults.set("persuasive", forKey: "writingProfile.style")
+
+        let repository = SettingsRepository(suiteName: suiteName)
+
+        XCTAssertEqual(repository.profile.tone, .keepMine)
+        XCTAssertEqual(repository.profile.style, .keepMine)
+    }
+
     func testInvalidPersistedEnumValuesFallBackWithoutDiscardingValidValues() throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defaults.set("unknown-tone", forKey: "writingProfile.tone")
-        defaults.set(WritingStyle.formal.rawValue, forKey: "writingProfile.style")
+        defaults.set(WritingStyle.concise.rawValue, forKey: "writingProfile.style")
         defaults.set("unknown-provider", forKey: "llm.provider")
         defaults.set(ProviderAuthentication.none.rawValue, forKey: "llm.authentication")
         defaults.set("unknown-thinking-mode", forKey: "llm.thinkingMode")
@@ -91,8 +105,8 @@ final class SettingsRepositoryTests: XCTestCase {
 
         let repository = SettingsRepository(suiteName: suiteName)
 
-        XCTAssertEqual(repository.profile.tone, .neutral)
-        XCTAssertEqual(repository.profile.style, .formal)
+        XCTAssertEqual(repository.profile.tone, .keepMine)
+        XCTAssertEqual(repository.profile.style, .concise)
         XCTAssertEqual(repository.llmSettings.provider, .openAICompatible)
         XCTAssertEqual(repository.llmSettings.authentication, .none)
         XCTAssertEqual(repository.llmSettings.thinkingMode, .off)

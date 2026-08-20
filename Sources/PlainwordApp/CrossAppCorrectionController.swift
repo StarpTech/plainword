@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import Combine
 @preconcurrency import CoreGraphics
 import PlainwordCore
@@ -93,6 +94,15 @@ final class CrossAppCorrectionController: ObservableObject {
     private var keyMonitor: Any?
     private var applyShortcutEventTap: CFMachPort?
     private var applyShortcutEventTapSource: CFRunLoopSource?
+    /// When the shortcut tap last saw a key press, on the uptime clock.
+    ///
+    /// A tap can report itself enabled and still be deaf, and that is the failure this
+    /// exists to catch. The system knows when a key was last pressed anywhere in the
+    /// session; a tap that did not see that press is not delivering, whatever it says
+    /// about itself.
+    private var lastTapKeyDownUptime: TimeInterval = 0
+    private var lastEventDeliveryRebuildUptime: TimeInterval = 0
+    private var systemWakeObservers: [NSObjectProtocol] = []
     private var mouseMonitor: Any?
     private var permissionTask: Task<Void, Never>?
     /// Keeps App Nap from throttling the run loop that answers the shortcut tap.
@@ -101,6 +111,9 @@ final class CrossAppCorrectionController: ObservableObject {
     private var sourceOverlayTrackingTask: Task<Void, Never>?
     private var sourceWindowTrackingTask: Task<Void, Never>?
     private var proposalRevalidationTask: Task<Void, Never>?
+    /// Reads the surroundings of an empty field while its prompt is being typed into,
+    /// so the receipt can show what a draft would be given before it is asked for.
+    private var contextPreviewTask: Task<Void, Never>?
     private var correctionGeneration = 0
     private var applicationTask: Task<Void, Never>?
     private var started = false
@@ -138,6 +151,13 @@ final class CrossAppCorrectionController: ObservableObject {
     /// The source window frame the current panel anchor was last reconciled against.
     private var sourceWindowFrame: CGRect?
     private var suggestionCache = CorrectionSuggestionCache()
+    /// How recently someone must have typed for the tap's silence to mean anything.
+    private static let deafTapObservationWindow: TimeInterval = 3
+    /// Slack between the system's record of the last key press and the tap's own, so a
+    /// press being handled at this very instant is never read as one that was missed.
+    private static let deafTapTolerance: TimeInterval = 1.5
+    /// A wrong diagnosis must not become a loop that tears delivery down every poll.
+    private static let eventDeliveryRebuildInterval: TimeInterval = 15
     private var reviewShortcutGate = ShortcutInvocationGate(minimumInterval: 0.35)
     private var transformShortcutGate = ShortcutInvocationGate(minimumInterval: 0.35)
     /// The review that is currently running, if there is one.
@@ -179,6 +199,7 @@ final class CrossAppCorrectionController: ObservableObject {
             reason: "Answering global keyboard shortcuts"
         )
         startTrackingActiveApplication()
+        startObservingSystemWake()
         refreshAccessibilityState()
 
         permissionTask = Task { [weak self] in
@@ -363,6 +384,8 @@ final class CrossAppCorrectionController: ObservableObject {
         isApplyingProposal = false
         correctionTask?.cancel()
         correctionTask = nil
+        contextPreviewTask?.cancel()
+        contextPreviewTask = nil
         runningReviewGeneration = nil
         pendingSnapshot = nil
         pendingCorrectionText = nil
@@ -381,11 +404,13 @@ final class CrossAppCorrectionController: ObservableObject {
     func stop() {
         applicationTask?.cancel()
         correctionTask?.cancel()
+        contextPreviewTask?.cancel()
         runningReviewGeneration = nil
         permissionTask?.cancel()
         proposalRevalidationTask?.cancel()
         setEventMonitoringEnabled(false)
         accessibilityChanges.stop()
+        stopObservingSystemWake()
         stopTrackingActiveApplication()
         dismissProposalUI()
         if let shortcutActivity {
@@ -489,7 +514,9 @@ final class CrossAppCorrectionController: ObservableObject {
                 case .partialText(let text):
                     // The compact review shows nothing but a small marker until it has
                     // a result, so there is no panel there to write into.
-                    guard !compactPresentation, isCurrentCorrection(generation) else {
+                    guard !compactPresentation,
+                          isCurrentCorrection(generation),
+                          Self.hasDiverged(text, from: snapshot.context.text) else {
                         continue
                     }
                     proposalPanel.updateStreamingText(text)
@@ -634,17 +661,22 @@ final class CrossAppCorrectionController: ObservableObject {
 
     private func presentComposePrompt(for snapshot: FocusedTextSnapshot) {
         correctionGeneration &+= 1
+        let generation = correctionGeneration
         applicationTask?.cancel()
         applicationTask = nil
         correctionTask?.cancel()
         correctionTask = nil
         proposalRevalidationTask?.cancel()
         proposalRevalidationTask = nil
+        contextPreviewTask?.cancel()
+        contextPreviewTask = nil
         stopSourceOverlay()
 
         pendingSnapshot = snapshot
         pendingCorrectionText = nil
         pendingSuggestion = nil
+        pendingAvailableContext = nil
+        pendingRequestSentContext = false
         suggestionHistory.removeAll()
         isProposalVisible = true
         isProposalSuspended = false
@@ -657,13 +689,48 @@ final class CrossAppCorrectionController: ObservableObject {
             near: anchor,
             title: "Write something",
             isComposing: true,
+            // What the field itself offers — the application it belongs to, and
+            // whatever the caret sits between. The interface around it takes a moment
+            // longer to read and joins the list below.
+            contextReceipt: ReadOnlyContextReceipt.items(for: snapshot.context),
+            contextApplicationName: snapshot.applicationName,
+            isContextSendingEnabled: isContextSendingEnabled(
+                forApplicationIdentifier: snapshot.applicationIdentifier
+            ),
             onSubmit: { [weak self] prompt in
                 self?.submitComposePrompt(prompt)
             },
             onDismiss: { [weak self] in
                 self?.dismissProposal()
+            },
+            onSetContextSendingEnabled: { [weak self] isEnabled in
+                self?.setContextSendingEnabled(
+                    isEnabled,
+                    forApplicationIdentifier: snapshot.applicationIdentifier
+                )
             }
         )
+        previewContext(for: snapshot, generation: generation)
+    }
+
+    /// Reads the surrounding interface while the compose prompt is open, and shows the
+    /// author what it found.
+    ///
+    /// A draft is written from nothing, so what the interface says around the field is
+    /// most of what the request has to go on — and an empty field has never had a
+    /// suggestion of its own to have offered the switch. Reading happens on this
+    /// machine whatever the switch says, exactly as it does for a suggestion: the list
+    /// is what the decision is about, and nothing leaves until the request does.
+    private func previewContext(for snapshot: FocusedTextSnapshot, generation: Int) {
+        contextPreviewTask = Task { [weak self] in
+            guard let self else { return }
+            let available = await accessibility.enriched(snapshot.context, for: snapshot)
+            guard isCurrentCorrection(generation), isCustomPromptVisible else { return }
+            pendingAvailableContext = available
+            proposalPanel.updateContextReceipt(
+                ReadOnlyContextReceipt.items(for: available)
+            )
+        }
     }
 
     private func submitComposePrompt(_ rawPrompt: String) {
@@ -681,6 +748,8 @@ final class CrossAppCorrectionController: ObservableObject {
 
         correctionGeneration &+= 1
         let generation = correctionGeneration
+        contextPreviewTask?.cancel()
+        contextPreviewTask = nil
         isCustomPromptVisible = false
         activity = .correcting(snapshot.applicationName)
         proposalPanel.showProcessing(
@@ -724,7 +793,10 @@ final class CrossAppCorrectionController: ObservableObject {
                 try Task.checkCancellation()
                 switch event {
                 case .partialText(let text):
-                    guard isCurrentCorrection(generation) else { continue }
+                    guard isCurrentCorrection(generation),
+                          Self.hasDiverged(text, from: requestContext.text) else {
+                        continue
+                    }
                     proposalPanel.updateStreamingText(text)
                 case .completed(let response):
                     correctionResponse = response
@@ -878,6 +950,21 @@ final class CrossAppCorrectionController: ObservableObject {
         startReview(for: snapshot)
     }
 
+    /// Whether streamed text has anything to show yet.
+    ///
+    /// The prompt tells the model to return text it found nothing wrong with unchanged,
+    /// so a clean check arrives as the author's own sentence echoed back a character at
+    /// a time. Drawing that grows the panel through the whole echo and then collapses it
+    /// to "No changes": the review reads as though it wrote something and took it back.
+    ///
+    /// Text is held until it stops agreeing with the original. An edit shows from the
+    /// word it changes, a completion from the point it runs past the end, a draft from
+    /// its first character — there is no original for it to agree with — and an echo
+    /// never shows at all, leaving the panel where it was until the verdict arrives.
+    private static func hasDiverged(_ streamed: String, from original: String) -> Bool {
+        !original.hasPrefix(streamed)
+    }
+
     private func finishReviewWithoutSuggestion(compactPresentation: Bool) {
         updateIdleActivity()
         guard !compactPresentation else {
@@ -972,7 +1059,10 @@ final class CrossAppCorrectionController: ObservableObject {
                 try Task.checkCancellation()
                 switch event {
                 case .partialText(let text):
-                    guard isCurrentCorrection(generation) else { continue }
+                    guard isCurrentCorrection(generation),
+                          Self.hasDiverged(text, from: editContext.text) else {
+                        continue
+                    }
                     proposalPanel.updateStreamingText(text)
                 case .completed(let response):
                     correctionResponse = response
@@ -1855,6 +1945,8 @@ final class CrossAppCorrectionController: ObservableObject {
         correctionGeneration &+= 1
         applicationTask?.cancel()
         applicationTask = nil
+        contextPreviewTask?.cancel()
+        contextPreviewTask = nil
         isApplyingProposal = false
         correctionTask?.cancel()
         correctionTask = nil
@@ -1946,6 +2038,55 @@ final class CrossAppCorrectionController: ObservableObject {
         updateIdleActivity()
     }
 
+    /// Records the focused application's accessibility tree and offers it for saving.
+    ///
+    /// Recording is how a heuristic here stops being an argument and becomes a
+    /// measurement: replayed offline, a captured tree exercises the real sources and the
+    /// real ranking against what an application genuinely publishes.
+    func recordAccessibilityFixture(scenario: String) -> String {
+        guard isAccessibilityTrusted else {
+            return "Accessibility access is required to record a tree."
+        }
+        guard let result = accessibility.recordFocusedTree(scenario: scenario) else {
+            return "Nothing writable was focused when the recording was taken."
+        }
+        let stem = result.fixture.application.replacingOccurrences(of: " ", with: "-")
+        let suffix = scenario.isEmpty ? "capture" : scenario
+        let suggestedName = (stem + "-" + suffix).lowercased() + ".json"
+
+        do {
+            guard let url = try AXFixtureCapture.save(
+                result.fixture,
+                suggestedName: suggestedName
+            ) else {
+                return "Recording discarded."
+            }
+            let sources = result.telemetry.contributingSources.joined(separator: ", ")
+            let nodes = result.fixture.nodes.count
+            let reads = result.telemetry.roundTrips
+            return "Saved \(nodes) nodes to \(url.lastPathComponent) — \(reads) reads from [\(sources)]."
+        } catch {
+            return "Could not write the recording: \(error.localizedDescription)"
+        }
+    }
+
+    /// Reads the surroundings of the newly focused field, off the request path.
+    ///
+    /// Nothing is sent anywhere by this: it fills a short-lived local cache so that a
+    /// shortcut pressed a moment later does not have to wait for the same reads. An
+    /// application the author has excluded is left entirely alone, as everywhere else.
+    private func prewarmContextForFocusedField() {
+        guard isReady, !isActiveApplicationExcluded, let application = activeApplication else {
+            return
+        }
+        Task { [accessibility] in
+            await accessibility.prewarmContext(
+                applicationName: application.name,
+                bundleIdentifier: application.id
+            )
+        }
+    }
+
     private func startAccessibilityChangeObservationIfPossible() {
         guard isAccessibilityTrusted,
               let processIdentifier = activeApplicationProcessIdentifier else {
@@ -1964,6 +2105,10 @@ final class CrossAppCorrectionController: ObservableObject {
         case .valueChanged:
             handleObservedValueChange()
         case .focusedElementChanged:
+            // Whatever was learned about the last field described a screen that has now
+            // moved on, and the new field's surroundings are worth reading before they
+            // are asked for.
+            prewarmContextForFocusedField()
             guard !isProposalVisible else {
                 handleObservedFocusChange()
                 return
@@ -2058,6 +2203,11 @@ final class CrossAppCorrectionController: ObservableObject {
 
     private func installApplyShortcutEventTapIfNeeded() {
         guard applyShortcutEventTap == nil else { return }
+        // `start()` runs from the app's initialiser, before AppKit has finished
+        // launching. A tap built against a session connection that is not there yet can
+        // come back alive and permanently deaf, which no health check can then repair.
+        // The accessibility poll retries a moment later, once there is a session.
+        guard NSApplication.shared.isRunning else { return }
 
         let eventMask = CGEventMask(1) << CGEventType.keyDown.rawValue
         guard let eventTap = CGEvent.tapCreate(
@@ -2072,6 +2222,9 @@ final class CrossAppCorrectionController: ObservableObject {
                     .takeUnretainedValue()
 
                 return MainActor.assumeIsolated {
+                    if type == .keyDown {
+                        controller.lastTapKeyDownUptime = ProcessInfo.processInfo.systemUptime
+                    }
                     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
                         if let eventTap = controller.applyShortcutEventTap {
                             CGEvent.tapEnable(tap: eventTap, enable: true)
@@ -2089,6 +2242,7 @@ final class CrossAppCorrectionController: ObservableObject {
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
             // The passive global monitor still provides the shortcut as a fallback.
+            logger.error("Could not create the shortcut event tap")
             return
         }
 
@@ -2096,6 +2250,8 @@ final class CrossAppCorrectionController: ObservableObject {
         applyShortcutEventTap = eventTap
         applyShortcutEventTapSource = source
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        // A tap that has never seen anything must not immediately look deaf.
+        lastTapKeyDownUptime = ProcessInfo.processInfo.systemUptime
         CGEvent.tapEnable(tap: eventTap, enable: true)
     }
 
@@ -2108,8 +2264,9 @@ final class CrossAppCorrectionController: ObservableObject {
     /// never revives it or tells anyone. Both stayed dead until the app was restarted,
     /// so this runs with the accessibility poll and re-arms whatever went quiet.
     private func rearmEventDeliveryIfDisabled() {
-        guard let eventTap = applyShortcutEventTap,
-              !CGEvent.tapIsEnabled(tap: eventTap) else {
+        guard let eventTap = applyShortcutEventTap else { return }
+        guard !CGEvent.tapIsEnabled(tap: eventTap) else {
+            rebuildEventDeliveryIfDeaf()
             return
         }
         logger.notice("Shortcut delivery was switched off by the system; re-arming it")
@@ -2117,10 +2274,91 @@ final class CrossAppCorrectionController: ObservableObject {
         if !CGEvent.tapIsEnabled(tap: eventTap) {
             // Re-enabling a tap the system has given up on does not always take, so
             // build a new one rather than leaving a dead port in place.
-            removeApplyShortcutEventTap()
-            installApplyShortcutEventTapIfNeeded()
+            rebuildEventDelivery(reason: "re-enabling the tap did not take")
+            return
         }
         recycleGlobalMonitors()
+    }
+
+    /// Rebuilds delivery that calls itself healthy but has stopped seeing keys.
+    ///
+    /// `tapIsEnabled` answers whether the system still has the tap switched on, not
+    /// whether anything reaches it, and that gap is the failure every check here used
+    /// to walk straight past: an enabled tap that never fires again, which re-enabling
+    /// cannot repair because it was never off. The system does record when a key was
+    /// last pressed anywhere in the session, so a press the tap did not see is the
+    /// evidence, and a new tap is the only answer.
+    private func rebuildEventDeliveryIfDeaf() {
+        guard applyShortcutEventTap != nil else { return }
+        // A password field takes the keyboard away from every tap in the session by
+        // design. Nothing is broken there and a rebuild would not change it.
+        guard !IsSecureEventInputEnabled() else { return }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastEventDeliveryRebuildUptime > Self.eventDeliveryRebuildInterval else {
+            return
+        }
+        let sinceSystemKeyDown = CGEventSource.secondsSinceLastEventType(
+            .combinedSessionState,
+            eventType: .keyDown
+        )
+        // Nobody has typed recently, so the tap's silence says nothing either way.
+        guard sinceSystemKeyDown.isFinite,
+              sinceSystemKeyDown < Self.deafTapObservationWindow else {
+            return
+        }
+        let sinceTapKeyDown = now - lastTapKeyDownUptime
+        guard sinceTapKeyDown > sinceSystemKeyDown + Self.deafTapTolerance else { return }
+
+        rebuildEventDelivery(
+            reason: """
+                a key was pressed \(String(format: "%.1f", sinceSystemKeyDown))s ago and \
+                the tap has seen nothing for \(String(format: "%.1f", sinceTapKeyDown))s
+                """
+        )
+    }
+
+    private func rebuildEventDelivery(reason: String) {
+        logger.notice("Rebuilding shortcut delivery: \(reason, privacy: .public)")
+        lastEventDeliveryRebuildUptime = ProcessInfo.processInfo.systemUptime
+        removeApplyShortcutEventTap()
+        installApplyShortcutEventTapIfNeeded()
+        recycleGlobalMonitors()
+    }
+
+    /// Sleep, display wake and fast user switching all hand the session's event taps
+    /// back in a state the system neither reports as broken nor repairs. Delivery is
+    /// rebuilt on the way back rather than after a press has already been lost.
+    private func startObservingSystemWake() {
+        guard systemWakeObservers.isEmpty else { return }
+        let center = NSWorkspace.shared.notificationCenter
+        let names: [Notification.Name] = [
+            NSWorkspace.didWakeNotification,
+            NSWorkspace.screensDidWakeNotification,
+            NSWorkspace.sessionDidBecomeActiveNotification
+        ]
+        systemWakeObservers = names.map { name in
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.handleSystemWake()
+                }
+            }
+        }
+    }
+
+    private func stopObservingSystemWake() {
+        let center = NSWorkspace.shared.notificationCenter
+        for observer in systemWakeObservers {
+            center.removeObserver(observer)
+        }
+        systemWakeObservers.removeAll()
+    }
+
+    private func handleSystemWake() {
+        guard isListeningEnabled, isAccessibilityTrusted else { return }
+        rebuildEventDelivery(reason: "the machine woke or its login session came back")
+        // The monitors were dropped with the tap; this puts them back.
+        refreshAccessibilityState()
     }
 
     /// There is no way to ask whether a global monitor is still alive, so a disabled
@@ -2228,8 +2466,16 @@ final class CrossAppCorrectionController: ObservableObject {
             }
             return
         }
+        let previousProcessIdentifier = activeApplicationProcessIdentifier
         activeApplication = identity
         activeApplicationProcessIdentifier = application.processIdentifier
+        if let previousProcessIdentifier {
+            Task { [accessibility] in
+                await accessibility.invalidateContext(
+                    processIdentifier: previousProcessIdentifier
+                )
+            }
+        }
         startAccessibilityChangeObservationIfPossible()
         if isProposalVisible,
            pendingSnapshot?.processIdentifier == application.processIdentifier {

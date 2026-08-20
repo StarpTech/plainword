@@ -3,6 +3,7 @@ import SwiftUI
 
 struct LLMDebugSettingsView: View {
     @ObservedObject var logStore: LLMDebugLogStore
+    @EnvironmentObject private var corrections: CrossAppCorrectionController
 
     private enum Scope: String, CaseIterable, Identifiable {
         case all
@@ -20,6 +21,8 @@ struct LLMDebugSettingsView: View {
 
     @State private var scope: Scope = .all
     @State private var inspectedCallID: UUID?
+    @State private var recordingCountdown: Int?
+    @State private var recordingStatus: String?
 
     var body: some View {
         SettingsPage {
@@ -31,6 +34,13 @@ struct LLMDebugSettingsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 listHeader
                 privacyNotice
+
+                if let recordingStatus {
+                    Text(recordingStatus)
+                        .font(PlainwordFont.ui(11))
+                        .foregroundStyle(PlainwordTheme.textSecondary)
+                        .textSelection(.enabled)
+                }
 
                 if logStore.entries.isEmpty {
                     emptyState(
@@ -84,6 +94,8 @@ struct LLMDebugSettingsView: View {
                 .font(PlainwordFont.ui(11))
                 .foregroundStyle(PlainwordTheme.textSecondary)
 
+            recordTreeButton
+
             Button("Clear") {
                 logStore.clear()
                 inspectedCallID = nil
@@ -91,6 +103,38 @@ struct LLMDebugSettingsView: View {
             .buttonStyle(PlainwordButtonStyle(.quiet))
             .disabled(logStore.entries.isEmpty)
             .help("Remove every recorded call from this session")
+        }
+    }
+
+    /// Captures the accessibility tree of whatever the author is writing in, so the
+    /// context pipeline can be replayed against it offline.
+    ///
+    /// The countdown exists because pressing this moves focus here. Without it the
+    /// recording would faithfully capture this settings window.
+    private var recordTreeButton: some View {
+        Button(recordingCountdown.map { "Recording in \($0)…" } ?? "Record tree") {
+            startRecording()
+        }
+        .buttonStyle(PlainwordButtonStyle(.quiet))
+        .disabled(recordingCountdown != nil)
+        .help(
+            """
+            Switch to the app you are writing in. After five seconds Plainword records \
+            what that app exposes about the focused field and offers to save it.
+            """
+        )
+    }
+
+    private func startRecording() {
+        recordingStatus = nil
+        recordingCountdown = 5
+        Task { @MainActor in
+            while let remaining = recordingCountdown, remaining > 0 {
+                try? await Task.sleep(for: .seconds(1))
+                recordingCountdown = remaining - 1
+            }
+            recordingCountdown = nil
+            recordingStatus = corrections.recordAccessibilityFixture(scenario: "capture")
         }
     }
 

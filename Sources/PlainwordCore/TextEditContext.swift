@@ -117,12 +117,9 @@ public enum TextEditContextExtractor {
         selectedRange: NSRange,
         scope: TextEditExtractionScope = .sentence,
         maximumUTF16Length: Int = 1_600,
-        maximumSurroundingContextUTF16Length: Int = 320
+        surrounding: ContextNeed = .modest
     ) -> TextEditContext? {
-        guard maximumUTF16Length > 0,
-              maximumSurroundingContextUTF16Length >= 0 else {
-            return nil
-        }
+        guard maximumUTF16Length > 0 else { return nil }
 
         let source = fullText as NSString
         guard selectedRange.location >= 0,
@@ -181,31 +178,20 @@ public enum TextEditContextExtractor {
         // The editable-target limit and the read-only context limit serve different
         // purposes. A long valid selection should not lose all of its context merely
         // because it approaches the edit limit.
-        let contextLimit = maximumSurroundingContextUTF16Length
-        let includeContext = (selectedRange.length > 0 || scope == .sentence)
-            && contextLimit > 0
-        let surroundingSentenceRanges = includeContext ? sentenceRanges(in: fullText) : []
+        let need = (selectedRange.length > 0 || scope == .sentence)
+            ? surrounding
+            : .identityOnly
 
         return TextEditContext(
             text: text,
             utf16Location: composed.location,
             utf16Length: composed.length,
-            leadingContext: includeContext
-                ? sentenceContextBefore(
-                    composed,
-                    limit: contextLimit,
-                    source: source,
-                    sentenceRanges: surroundingSentenceRanges
-                )
-                : "",
-            trailingContext: includeContext
-                ? sentenceContextAfter(
-                    composed,
-                    limit: contextLimit,
-                    source: source,
-                    sentenceRanges: surroundingSentenceRanges
-                )
-                : "",
+            leadingContext: PassageExtractor
+                .before(composed, in: fullText, budget: need.leading)
+                .marked(.leading),
+            trailingContext: PassageExtractor
+                .after(composed, in: fullText, budget: need.trailing)
+                .marked(.trailing),
             targetKind: targetKind,
             completionIsAllowed: selectedRange.length == 0
                 && scope == .sentence
@@ -232,7 +218,7 @@ public enum TextEditContextExtractor {
     public static func insertionPoint(
         in fullText: String,
         at utf16Location: Int,
-        maximumSurroundingContextUTF16Length: Int = 320
+        surrounding: ContextNeed = .hungry
     ) -> TextEditContext? {
         let source = fullText as NSString
         guard utf16Location >= 0,
@@ -244,23 +230,16 @@ public enum TextEditContextExtractor {
         // Whatever surrounds a blank line is all the request has to write from, so it
         // travels as read-only context. An empty field simply has none of it.
         let caret = NSRange(location: utf16Location, length: 0)
-        let surroundingSentenceRanges = sentenceRanges(in: fullText)
         return TextEditContext(
             text: "",
             utf16Location: utf16Location,
             utf16Length: 0,
-            leadingContext: sentenceContextBefore(
-                caret,
-                limit: maximumSurroundingContextUTF16Length,
-                source: source,
-                sentenceRanges: surroundingSentenceRanges
-            ),
-            trailingContext: sentenceContextAfter(
-                caret,
-                limit: maximumSurroundingContextUTF16Length,
-                source: source,
-                sentenceRanges: surroundingSentenceRanges
-            ),
+            leadingContext: PassageExtractor
+                .before(caret, in: fullText, budget: surrounding.leading)
+                .marked(.leading),
+            trailingContext: PassageExtractor
+                .after(caret, in: fullText, budget: surrounding.trailing)
+                .marked(.trailing),
             targetKind: .insertionPoint
         )
     }
@@ -381,27 +360,6 @@ public enum TextEditContextExtractor {
         return rangeStartingAtCursor ?? containingRange
     }
 
-    private static func sentenceRanges(in text: String) -> [NSRange] {
-        var ranges: [NSRange] = []
-        text.enumerateSubstrings(
-            in: text.startIndex..<text.endIndex,
-            options: [.bySentences, .substringNotRequired]
-        ) { _, range, _, _ in
-            ranges.append(NSRange(range, in: text))
-        }
-        return ranges
-    }
-
-    private static func sentenceIndex(
-        around utf16Location: Int,
-        in ranges: [NSRange]
-    ) -> Int? {
-        ranges.firstIndex { range in
-            utf16Location == range.location
-                || (utf16Location > range.location && utf16Location < NSMaxRange(range))
-        }
-    }
-
     /// Reports whether the paragraph holding the caret carries no text.
     ///
     /// A caret at the very end of the text is treated as its own empty paragraph when
@@ -446,64 +404,6 @@ public enum TextEditContextExtractor {
     }
 
     private static let sentenceEndings: Set<Character> = [".", "!", "?", "。", "！", "？"]
-
-    private static func sentenceContextBefore(
-        _ target: NSRange,
-        limit: Int,
-        source: NSString,
-        sentenceRanges: [NSRange]
-    ) -> String {
-        guard target.location > 0, limit > 0 else { return "" }
-        let lowerBound: Int
-        if let targetSentenceIndex = sentenceIndex(
-            around: target.location,
-            in: sentenceRanges
-        ) {
-            lowerBound = sentenceRanges[max(0, targetSentenceIndex - 1)].location
-        } else {
-            lowerBound = 0
-        }
-        let start = max(lowerBound, target.location - limit)
-        let proposed = NSRange(location: start, length: target.location - start)
-        let composed = source.rangeOfComposedCharacterSequences(for: proposed)
-        let safeStart = max(0, composed.location)
-        let safeEnd = min(target.location, NSMaxRange(composed))
-        guard safeEnd > safeStart else { return "" }
-        return source.substring(with: NSRange(location: safeStart, length: safeEnd - safeStart))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func sentenceContextAfter(
-        _ target: NSRange,
-        limit: Int,
-        source: NSString,
-        sentenceRanges: [NSRange]
-    ) -> String {
-        let targetEnd = NSMaxRange(target)
-        guard targetEnd < source.length, limit > 0 else { return "" }
-        let endAnchor = max(target.location, targetEnd - 1)
-        let upperBound: Int
-        if let targetSentenceIndex = sentenceIndex(
-            around: endAnchor,
-            in: sentenceRanges
-        ) {
-            upperBound = NSMaxRange(
-                sentenceRanges[min(sentenceRanges.count - 1, targetSentenceIndex + 1)]
-            )
-        } else {
-            upperBound = source.length
-        }
-        let proposed = NSRange(
-            location: targetEnd,
-            length: min(limit, upperBound - targetEnd)
-        )
-        let composed = source.rangeOfComposedCharacterSequences(for: proposed)
-        let safeStart = max(targetEnd, composed.location)
-        let safeEnd = min(source.length, NSMaxRange(composed))
-        guard safeEnd > safeStart else { return "" }
-        return source.substring(with: NSRange(location: safeStart, length: safeEnd - safeStart))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
 
     private static func trimmingWhitespace(
         from range: NSRange,

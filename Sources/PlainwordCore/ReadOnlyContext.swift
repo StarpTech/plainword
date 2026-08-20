@@ -76,10 +76,31 @@ public enum ReadOnlyContextKind: String, CaseIterable, Equatable, Hashable, Send
 public struct ReadOnlyContextFragment: Equatable, Hashable, Sendable {
     public let kind: ReadOnlyContextKind
     public let text: String
+    /// Which source found this, and whether the application stated it or Plainword
+    /// inferred it. Absent for a fragment built by hand rather than harvested.
+    public let provenance: ContextProvenance?
 
-    public init(kind: ReadOnlyContextKind, text: String) {
+    public init(
+        kind: ReadOnlyContextKind,
+        text: String,
+        provenance: ContextProvenance? = nil
+    ) {
         self.kind = kind
         self.text = text
+        self.provenance = provenance
+    }
+
+    /// Identity is the kind and the text, never where they were found. Two fragments
+    /// carrying the same words are the same context whichever source turned them up,
+    /// and the suggestion cache keys on that — so a fragment that arrives from the
+    /// transcript this time and the traversal the next must not read as a change.
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.kind == rhs.kind && lhs.text == rhs.text
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(kind)
+        hasher.combine(text)
     }
 }
 
@@ -88,17 +109,30 @@ public struct ReadOnlyContextCandidate: Equatable, Sendable {
     public let text: String
     public let relevance: Int
     public let readingOrder: Int
+    public let provenance: ContextProvenance?
 
     public init(
         kind: ReadOnlyContextKind,
         text: String,
         relevance: Int,
-        readingOrder: Int
+        readingOrder: Int,
+        provenance: ContextProvenance? = nil
     ) {
         self.kind = kind
         self.text = text
         self.relevance = relevance
         self.readingOrder = readingOrder
+        self.provenance = provenance
+    }
+
+    public func with(provenance: ContextProvenance) -> ReadOnlyContextCandidate {
+        .init(
+            kind: kind,
+            text: text,
+            relevance: relevance,
+            readingOrder: readingOrder,
+            provenance: provenance
+        )
     }
 }
 
@@ -106,6 +140,7 @@ public enum ReadOnlyContextRanker {
     public static func select(
         from candidates: [ReadOnlyContextCandidate],
         excluding excludedTexts: [String] = [],
+        relatedTo targetText: String = "",
         maximumUTF16Length: Int,
         maximumFragments: Int = 8,
         minimumRelevance: Int = 300
@@ -115,15 +150,30 @@ public enum ReadOnlyContextRanker {
         let excluded = excludedTexts.compactMap(normalized)
         let normalizedCandidates = candidates.enumerated().compactMap {
             index, candidate -> RankedCandidate? in
-            guard candidate.relevance >= minimumRelevance,
-                  let text = normalized(candidate.text),
+            guard let text = normalized(candidate.text),
+                  !ContextRelevance.isNoise(text),
                   !substantiallyOverlaps(text, anyOf: excluded) else {
                 return nil
             }
-            return RankedCandidate(candidate: candidate, text: text, insertionOrder: index)
+            let score = candidate.relevance
+                + ContextRelevance.lexicalBoost(for: text, relatedTo: targetText)
+            guard score >= minimumRelevance else { return nil }
+            return RankedCandidate(
+                candidate: candidate,
+                text: text,
+                score: score,
+                insertionOrder: index
+            )
         }.sorted { lhs, rhs in
-            if lhs.candidate.relevance != rhs.candidate.relevance {
-                return lhs.candidate.relevance > rhs.candidate.relevance
+            if lhs.score != rhs.score {
+                return lhs.score > rhs.score
+            }
+            // A fact the application published outranks one read off the screen, whatever
+            // the geometry made of them.
+            let lhsConfidence = lhs.candidate.provenance?.confidence ?? .inferred
+            let rhsConfidence = rhs.candidate.provenance?.confidence ?? .inferred
+            if lhsConfidence != rhsConfidence {
+                return lhsConfidence > rhsConfidence
             }
             return lhs.insertionOrder < rhs.insertionOrder
         }
@@ -159,6 +209,7 @@ public enum ReadOnlyContextRanker {
                 RankedCandidate(
                     candidate: rankedCandidate.candidate,
                     text: text,
+                    score: rankedCandidate.score,
                     insertionOrder: rankedCandidate.insertionOrder
                 )
             )
@@ -194,12 +245,20 @@ public enum ReadOnlyContextRanker {
         let selectedOrders = Set(presented.map(\.insertionOrder))
         return presented.enumerated().map { index, item in
             guard index > 0 else {
-                return ReadOnlyContextFragment(kind: item.candidate.kind, text: item.text)
+                return ReadOnlyContextFragment(
+                    kind: item.candidate.kind,
+                    text: item.text,
+                    provenance: item.candidate.provenance
+                )
             }
             let previous = presented[index - 1]
             let kind = item.candidate.kind
             guard kind.contiguityMatters, previous.candidate.kind == kind else {
-                return ReadOnlyContextFragment(kind: kind, text: item.text)
+                return ReadOnlyContextFragment(
+                    kind: kind,
+                    text: item.text,
+                    provenance: item.candidate.provenance
+                )
             }
             let lowerBound = min(previous.candidate.readingOrder, item.candidate.readingOrder)
             let upperBound = max(previous.candidate.readingOrder, item.candidate.readingOrder)
@@ -211,7 +270,8 @@ public enum ReadOnlyContextRanker {
             }
             return ReadOnlyContextFragment(
                 kind: kind,
-                text: omittedContentExists ? "\(elisionMarker) \(item.text)" : item.text
+                text: omittedContentExists ? "\(elisionMarker) \(item.text)" : item.text,
+                provenance: item.candidate.provenance
             )
         }
     }
@@ -223,11 +283,30 @@ public enum ReadOnlyContextRanker {
     private struct RankedCandidate {
         let candidate: ReadOnlyContextCandidate
         let text: String
+        /// The candidate's own relevance plus whatever its wording earned it.
+        let score: Int
         let insertionOrder: Int
     }
 
+    /// Stand-ins for things that are not text at all. A page's images, videos, and
+    /// embedded objects each leave one behind in a marker read, and a media-heavy page
+    /// can be more of these than words.
+    private static let nonTextPlaceholders = CharacterSet(charactersIn: "\u{fffc}\u{fffd}")
+
     private static func normalized(_ text: String) -> String? {
-        let normalized = text
+        // Control characters survive whitespace collapsing because they are not
+        // whitespace. They reach here from real interfaces — a recording showed one
+        // application answering with its own name wrapped in them — and from there they
+        // would travel into a prompt as invisible noise inside a tag.
+        let stripped = String(
+            String.UnicodeScalarView(
+                text.unicodeScalars.filter {
+                    !CharacterSet.controlCharacters.contains($0)
+                        && !nonTextPlaceholders.contains($0)
+                }
+            )
+        )
+        let normalized = stripped
             .replacingOccurrences(of: "\u{00a0}", with: " ")
             .split(whereSeparator: \.isWhitespace)
             .joined(separator: " ")

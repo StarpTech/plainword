@@ -17,6 +17,10 @@ private enum CorrectionPresentationMetrics {
     static let appliedSize = CGSize(width: 104, height: 34)
     /// How long the applied chip stays before the panel gets out of the way.
     static let appliedDuration: Duration = .milliseconds(1900)
+    /// Providers send text in uneven bursts, so resizes are held to a fixed cadence
+    /// rather than following the bursts. The resize animation is exactly this long,
+    /// so one step ends as the next begins.
+    static let streamingResizeInterval: Double = 0.06
 }
 
 /// Geometry of the expanded context receipt.
@@ -225,18 +229,32 @@ private final class CorrectionPanelModel: ObservableObject {
     var contextApplicationName: String { state.contextApplicationName }
     var isContextSendingEnabled: Bool { state.isContextSendingEnabled }
     var contextWasSentWithSuggestion: Bool { state.contextWasSentWithSuggestion }
+    /// Whether what the list shows counts as attached: for a suggestion already made,
+    /// whether it went with it; for a request still being written, whether it will.
+    var contextIsAttached: Bool {
+        state.phase == .prompting
+            ? state.isContextSendingEnabled
+            : state.contextWasSentWithSuggestion
+    }
     var contextReceiptHeight: CGFloat {
         ContextReceiptMetrics.height(forItemCount: state.contextReceipt.count)
     }
-    /// The receipt describes what a finished suggestion was given, so it only makes
-    /// sense once there is a suggestion on screen.
+    /// The receipt accounts for what a request carries: what the suggestion on screen
+    /// was given, or — at a prompt — what the request about to be sent will be given.
+    ///
+    /// A prompt is the only place that decision can still be made before the request
+    /// goes, which matters most for a draft. An empty field has no earlier suggestion
+    /// to have offered the switch, so without it here the first thing Plainword writes
+    /// in an application could never be given its surroundings.
     ///
     /// It stays available when nothing was read, because that is the only place the
     /// switch below it lives — hiding it would make turning reading back on impossible
     /// without a trip to Settings.
     var showsContextReceipt: Bool {
         !state.contextApplicationName.isEmpty
-            && (state.phase == .ready || state.phase == .streaming)
+            && (state.phase == .ready
+                || state.phase == .streaming
+                || state.phase == .prompting)
     }
     var showsBackButton: Bool {
         state.showsPromptBackButton || state.showsSuggestionBackButton
@@ -355,6 +373,21 @@ private final class CorrectionPanelModel: ObservableObject {
         state.isContextReceiptExpanded = false
     }
 
+    /// Replaces the list without collapsing the section around it.
+    ///
+    /// A prompt shows what is there before anything has been asked for, so its list is
+    /// still being read from the interface while the author types — and may land under
+    /// a receipt they have already opened.
+    func updateContextReceipt(_ contextReceipt: [ReadOnlyContextReceiptItem]) {
+        guard state.contextReceipt != contextReceipt else { return }
+        let changes = { self.state.contextReceipt = contextReceipt }
+        if PlainwordMotion.reducesMotion {
+            changes()
+        } else {
+            withAnimation(PlainwordMotion.content, changes)
+        }
+    }
+
     func setContextSendingEnabled(_ isEnabled: Bool) {
         guard state.isContextSendingEnabled != isEnabled else { return }
         let changes = { self.state.isContextSendingEnabled = isEnabled }
@@ -451,6 +484,8 @@ final class CorrectionPanelController {
     private var targetFrame: NSRect?
     private var userPositionedOrigin: NSPoint?
     private var streamingResizeTask: Task<Void, Never>?
+    /// The size the panel has already grown to for the stream in progress.
+    private var streamingSizeFloor: NSSize?
     private var appliedDismissTask: Task<Void, Never>?
     private var visibilityGeneration = 0
 
@@ -600,19 +635,29 @@ final class CorrectionPanelController {
         presentPanel()
     }
 
+    /// Presents the prompt.
+    ///
+    /// A context receipt is offered here whenever the caller names an application for
+    /// it. Nothing has been sent yet at a prompt, so the switch decides what this
+    /// request will carry rather than what the last one did.
     func showPrompt(
         near anchor: CGRect,
         title: String,
         isComposing: Bool = false,
+        contextReceipt: [ReadOnlyContextReceiptItem] = [],
+        contextApplicationName: String = "",
+        isContextSendingEnabled: Bool = false,
         onSubmit: @escaping (String) -> Void,
         onBack: (() -> Void)? = nil,
-        onDismiss: @escaping () -> Void
+        onDismiss: @escaping () -> Void,
+        onSetContextSendingEnabled: ((Bool) -> Void)? = nil
     ) {
         self.onAccept = nil
         self.onDismiss = onDismiss
         self.onBack = onBack
         self.onRequestPrompt = nil
         self.onSubmitPrompt = onSubmit
+        self.onSetContextSendingEnabled = onSetContextSendingEnabled
         cancelScheduledStreamingResize()
         model.beginPrompt(
             pointerEdge: verticalPlacement.pointerEdge,
@@ -620,11 +665,24 @@ final class CorrectionPanelController {
             title: title,
             isComposing: isComposing
         )
+        model.setContextReceipt(
+            contextReceipt,
+            applicationName: contextApplicationName,
+            isSendingEnabled: isContextSendingEnabled,
+            wasSentWithSuggestion: false
+        )
         configurePlacement(near: anchor)
         model.setPointerEdge(verticalPlacement.pointerEdge)
         targetFrame = nil
         resizeForContent(animated: panel.isVisible)
         presentPanel(makeKey: true)
+    }
+
+    /// Hands the open prompt the context that was read while it was being typed into.
+    func updateContextReceipt(_ contextReceipt: [ReadOnlyContextReceiptItem]) {
+        model.updateContextReceipt(contextReceipt)
+        targetFrame = nil
+        resizeForContent(animated: true)
     }
 
     func showPromptTrigger(
@@ -885,10 +943,68 @@ final class CorrectionPanelController {
         }
     }
 
-    private func resizeForContent(animated: Bool) {
+    /// How a resize is played out.
+    private enum ResizeMotion {
+        /// The app's one duration, eased out: a panel settling into a new shape.
+        case settled
+        /// Paced to the cadence of the arriving text, and even the whole way through.
+        ///
+        /// An eased 180 ms curve restarted every 60 ms never finishes: each arrival
+        /// re-aims the frame from wherever the last curve had reached, so the panel
+        /// accelerates and stalls by turns. A linear step the length of one arrival
+        /// lands exactly as the next one begins, and consecutive steps read as one
+        /// continuous movement.
+        case streaming
+
+        var duration: Double {
+            switch self {
+            case .settled: PlainwordMotion.duration
+            case .streaming: CorrectionPresentationMetrics.streamingResizeInterval
+            }
+        }
+
+        var timingFunction: CAMediaTimingFunction {
+            switch self {
+            // AppKit eases in and out by default. The content inside eases out, and
+            // two curves over the same 180 ms read as the panel and its contents
+            // coming apart.
+            case .settled: CAMediaTimingFunction(name: .easeOut)
+            case .streaming: CAMediaTimingFunction(name: .linear)
+            }
+        }
+
+        /// Streamed text draws itself in at its own pace. Letting the frame animation
+        /// catch the content as well cross-fades the text on every arrival, on top of
+        /// the reveal already running through it.
+        var animatesContent: Bool {
+            switch self {
+            case .settled: true
+            case .streaming: false
+            }
+        }
+    }
+
+    private func resizeForContent(
+        animated: Bool,
+        motion: ResizeMotion = .settled
+    ) {
         let layout = targetLayout
-        let size = layout.size
-        model.setContentRequiresScrolling(layout.contentRequiresScrolling)
+        var size = layout.size
+        var contentRequiresScrolling = layout.contentRequiresScrolling
+        if model.phase == .streaming {
+            // Text that arrives mid-word rewraps, so a panel that answered every
+            // measurement would shrink and grow again within a frame or two. A stream
+            // only ever gains text, so the panel only ever grows with it.
+            if let floor = streamingSizeFloor {
+                size.width = max(size.width, floor.width)
+                size.height = max(size.height, floor.height)
+            }
+            streamingSizeFloor = size
+            contentRequiresScrolling = layout.naturalHeight > size.height + 0.5
+        } else {
+            streamingSizeFloor = nil
+        }
+        model.setContentRequiresScrolling(contentRequiresScrolling)
         let frameOrigin: NSPoint
         if let userPositionedOrigin {
             frameOrigin = constrainedOrigin(userPositionedOrigin, for: size)
@@ -904,12 +1020,9 @@ final class CorrectionPanelController {
            panel.isVisible,
            !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = PlainwordMotion.duration
-                // AppKit eases in and out by default. The content inside eases out,
-                // and two curves over the same 180 ms read as the panel and its
-                // contents coming apart.
-                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                context.allowsImplicitAnimation = true
+                context.duration = motion.duration
+                context.timingFunction = motion.timingFunction
+                context.allowsImplicitAnimation = motion.animatesContent
                 panel.animator().setFrame(frame, display: true)
             }
         } else {
@@ -925,16 +1038,21 @@ final class CorrectionPanelController {
     private func scheduleStreamingResize() {
         guard streamingResizeTask == nil else { return }
         streamingResizeTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(60))
+            try? await Task.sleep(
+                for: .seconds(CorrectionPresentationMetrics.streamingResizeInterval)
+            )
             guard !Task.isCancelled, let self else { return }
             self.streamingResizeTask = nil
-            self.resizeForContent(animated: true)
+            self.resizeForContent(animated: true, motion: .streaming)
         }
     }
 
     private func cancelScheduledStreamingResize() {
         streamingResizeTask?.cancel()
         streamingResizeTask = nil
+        // A restarted request streams from nothing again, and must not be held to the
+        // height its predecessor had reached.
+        streamingSizeFloor = nil
     }
 
     private func movePanel(to proposedOrigin: NSPoint) {
@@ -1023,6 +1141,10 @@ final class CorrectionPanelController {
 
     private struct PanelLayout {
         let size: NSSize
+        /// What the content asked for, before the screen and the maximum clamped it.
+        /// Kept so a size raised by the streaming floor can re-decide whether the
+        /// content still has to scroll.
+        let naturalHeight: CGFloat
         let contentRequiresScrolling: Bool
     }
 
@@ -1030,12 +1152,14 @@ final class CorrectionPanelController {
         if model.phase == .promptTrigger || model.phase == .promptTriggerLoading {
             return PanelLayout(
                 size: CorrectionPresentationMetrics.triggerSize,
+                naturalHeight: CorrectionPresentationMetrics.triggerSize.height,
                 contentRequiresScrolling: false
             )
         }
         if model.phase == .applied {
             return PanelLayout(
                 size: CorrectionPresentationMetrics.appliedSize,
+                naturalHeight: CorrectionPresentationMetrics.appliedSize.height,
                 contentRequiresScrolling: false
             )
         }
@@ -1056,8 +1180,16 @@ final class CorrectionPanelController {
             contentHeight = 46
             showsFooter = false
         case .streaming:
+            // The caret is drawn after the text and can carry the last word onto a
+            // line of its own, so it is measured with it. Sizing without it leaves the
+            // panel a line short exactly when the text is about to wrap, which turns
+            // the scroll view on and off again with every few characters.
             contentHeight = Self.labelledContentInset
-                + measuredTextHeight(model.correctedText, lineSpacing: 4)
+                + measuredTextHeight(
+                    model.correctedText + Self.streamingCaret,
+                    font: Self.suggestionFont,
+                    lineSpacing: Self.suggestionLineSpacing
+                )
         case .failure(let message):
             contentHeight = 26 + measuredTextHeight(
                 message,
@@ -1082,6 +1214,7 @@ final class CorrectionPanelController {
         let canScroll = model.phase == .streaming || model.phase == .ready
         return PanelLayout(
             size: NSSize(width: panelWidth, height: height),
+            naturalHeight: canScroll ? ceil(naturalHeight) : height,
             contentRequiresScrolling: canScroll && naturalHeight > height + 0.5
         )
     }
@@ -1111,7 +1244,15 @@ final class CorrectionPanelController {
     private static let suggestionFont = PlainwordFont.serifNSFont(15)
     private static let suggestionLineSpacing: CGFloat = 4
     /// Padding, the mono section label, and the gap under it.
-    private static let labelledContentInset: CGFloat = 48
+    ///
+    /// Every labelled section — the streaming text, a draft, a proposed edit — uses the
+    /// same header row, so text measured under one heading lands where it will sit
+    /// under the next one. Streaming into a result changes the heading, not the layout.
+    private static let labelledContentInset: CGFloat = 26
+        + CorrectionPresentationMetrics.previewHeaderHeight
+        + 7
+    /// Drawn after streamed text, and measured with it.
+    fileprivate static let streamingCaret = " \u{258D}"
 
     private var readyContentHeight: CGFloat {
         guard let suggestion = model.suggestion else { return 70 }
@@ -1152,10 +1293,7 @@ final class CorrectionPanelController {
         case .changes:
             textHeight = measuredDiffHeight(for: suggestion)
         }
-        return 26
-            + CorrectionPresentationMetrics.previewHeaderHeight
-            + 7
-            + textHeight
+        return Self.labelledContentInset + textHeight
     }
 
     /// Measured with the weights the diff is actually drawn in.
@@ -1252,7 +1390,17 @@ final class CorrectionPanelController {
             (targetScreen?.visibleFrame.width ?? maximumPanelWidth) - 20
         )
         guard let suggestion = model.suggestion else {
-            return min(regularPanelWidth, availableWidth)
+            // Streamed text is measured by the same rule the result will be measured
+            // by, so the panel reaches its final width while the text is still
+            // arriving instead of stepping out to it once the answer lands.
+            guard model.phase == .streaming, !model.correctedText.isEmpty else {
+                return min(regularPanelWidth, availableWidth)
+            }
+            return preferredWidth(
+                for: model.correctedText,
+                minimum: regularPanelWidth,
+                available: availableWidth
+            )
         }
 
         let minimumWidth: CGFloat
@@ -1269,16 +1417,30 @@ final class CorrectionPanelController {
             text = suggestion.replacementText
         }
 
+        return preferredWidth(
+            for: text,
+            minimum: minimumWidth,
+            available: availableWidth
+        )
+    }
+
+    /// The width a run of text asks for: what it needs unwrapped, within the panel's
+    /// own bounds. Shared so streamed text and the result it becomes agree.
+    private func preferredWidth(
+        for text: String,
+        minimum: CGFloat,
+        available: CGFloat
+    ) -> CGFloat {
         let measuredWidth = NSString(string: text).boundingRect(
             with: NSSize(width: CGFloat.greatestFiniteMagnitude, height: 24),
             options: [.usesFontLeading],
             attributes: [.font: Self.suggestionFont]
         ).width
-        let preferredWidth = min(
+        let preferred = min(
             maximumPanelWidth,
-            max(minimumWidth, ceil(measuredWidth) + 28)
+            max(minimum, ceil(measuredWidth) + 28)
         )
-        return min(preferredWidth, availableWidth)
+        return min(preferred, available)
     }
 
     private func measuredTextHeight(
@@ -1500,7 +1662,7 @@ private struct StreamingTextView: View {
             : Self.caretMinimumOpacity
                 + (1 - Self.caretMinimumOpacity)
                 * (0.5 - 0.5 * cos(caretPhase * 2 * .pi / Self.caretPeriod))
-        return Text(" \u{258D}")
+        return Text(CorrectionPanelController.streamingCaret)
             .foregroundStyle(PlainwordTheme.accent.opacity(pulse))
     }
 
@@ -1953,6 +2115,14 @@ private struct CrossAppProposalView: View {
     private var promptingContent: some View {
         VStack(spacing: 0) {
             promptContent
+
+            if model.showsContextReceipt, model.isContextReceiptExpanded {
+                Rectangle()
+                    .fill(PlainwordTheme.separator)
+                    .frame(height: 1)
+                contextReceiptSection
+            }
+
             Rectangle()
                 .fill(PlainwordTheme.separator)
                 .frame(height: 1)
@@ -2048,9 +2218,10 @@ private struct CrossAppProposalView: View {
                 VStack(alignment: .leading, spacing: ContextReceiptMetrics.rowSpacing) {
                     ForEach(model.contextReceipt) { receiptRow($0) }
                 }
-                // Dimmed when this suggestion was not given them, so the difference
-                // between "available" and "used" is visible rather than explained.
-                .opacity(model.contextWasSentWithSuggestion ? 1 : 0.45)
+                // Dimmed when the request they belong to was not given them, so the
+                // difference between "available" and "used" is visible rather than
+                // explained.
+                .opacity(model.contextIsAttached ? 1 : 0.45)
             }
 
         }
@@ -2068,8 +2239,16 @@ private struct CrossAppProposalView: View {
         .transition(PlainwordMotion.rise)
     }
 
-    /// Switching this sends nothing and changes nothing about the suggestion on screen.
-    /// It decides whether the next one is given what the list above shows.
+    /// At a prompt the switch decides what the request being written will carry. Under
+    /// a suggestion it is too late for that one, so it decides for the next.
+    private var contextSwitchTip: String {
+        model.phase == .prompting
+            ? "Attach what Plainword found here to this request."
+            : "Attach what Plainword found here to your next suggestion."
+    }
+
+    /// Switching this sends nothing. Under a finished suggestion it changes nothing
+    /// about it either; at a prompt it decides what that request is given.
     private var contextSendingSwitch: some View {
         Toggle(isOn: Binding(
             get: { model.isContextSendingEnabled },
@@ -2086,11 +2265,13 @@ private struct CrossAppProposalView: View {
         .tint(PlainwordTheme.accent)
         .frame(height: ContextReceiptMetrics.controlRowHeight)
         .hoverTip("""
-        Attach what Plainword found here to your next suggestion.
+        \(contextSwitchTip)
         Applies to \(model.contextApplicationName) only.
         """)
         .accessibilityHint(
-            "Decides whether your next suggestion in this application has the text found around this field attached"
+            model.phase == .prompting
+                ? "Decides whether this request has the text found around this field attached"
+                : "Decides whether your next suggestion in this application has the text found around this field attached"
         )
     }
 
@@ -2129,6 +2310,10 @@ private struct CrossAppProposalView: View {
         } else {
             VStack(alignment: .leading, spacing: 7) {
                 sectionLabel("Suggested revision")
+                    .frame(
+                        height: CorrectionPresentationMetrics.previewHeaderHeight,
+                        alignment: .leading
+                    )
                 StreamingTextView(
                     text: model.correctedText,
                     isStreaming: model.phase == .streaming
@@ -2165,6 +2350,10 @@ private struct CrossAppProposalView: View {
         let usesFullText = phrases.count > CorrectionPresentationMetrics.maximumChipCount
         return VStack(alignment: .leading, spacing: 7) {
             sectionLabel(usesFullText ? "Suggested text" : "Use instead")
+                .frame(
+                    height: CorrectionPresentationMetrics.previewHeaderHeight,
+                    alignment: .leading
+                )
             if usesFullText {
                 Text(suggestion.replacementText)
                     .font(PlainwordFont.serif(15))
@@ -2207,6 +2396,13 @@ private struct CrossAppProposalView: View {
     private func labeledText(_ label: String, text: String) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             sectionLabel(label)
+                // Every labelled section stands its heading in a row of this height,
+                // so the text under it sits at the same place whichever section is
+                // showing — streamed text becoming a result does not shift it.
+                .frame(
+                    height: CorrectionPresentationMetrics.previewHeaderHeight,
+                    alignment: .leading
+                )
             Text(text)
                 .font(PlainwordFont.serif(15))
                 .lineSpacing(4)
@@ -2263,6 +2459,9 @@ private struct CrossAppProposalView: View {
     private var footer: some View {
         HStack(spacing: 7) {
             if model.phase == .prompting {
+                if model.showsContextReceipt {
+                    contextReceiptToggle
+                }
                 Spacer(minLength: 8)
                 Button(action: model.showsPromptBackButton ? onBack : onDismiss) {
                     PlainwordShortcutLabel(
@@ -2315,10 +2514,6 @@ private struct CrossAppProposalView: View {
                 }
                     .buttonStyle(PlainwordButtonStyle())
                     .keyboardShortcut(.cancelAction)
-                if model.phase == .ready, model.showsBackButton {
-                    Button("Back", action: onBack)
-                        .buttonStyle(PlainwordButtonStyle())
-                }
                 if model.phase == .ready {
                     Button(action: onAccept) {
                         PlainwordShortcutLabel(
@@ -2365,7 +2560,7 @@ private struct CrossAppProposalView: View {
         .hoverTip("""
         \(ReadOnlyContextReceipt.summary(
                 forItemCount: model.contextReceipt.count,
-                wasAttached: model.contextWasSentWithSuggestion
+                wasAttached: model.contextIsAttached
             ))
         Only this window. Never password fields.
         """)
@@ -2373,7 +2568,7 @@ private struct CrossAppProposalView: View {
         .accessibilityValue(
             ReadOnlyContextReceipt.summary(
                 forItemCount: model.contextReceipt.count,
-                wasAttached: model.contextWasSentWithSuggestion
+                wasAttached: model.contextIsAttached
             )
         )
         .accessibilityHint("Shows what Plainword found around this field")

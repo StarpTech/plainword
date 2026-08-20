@@ -26,8 +26,9 @@ public struct SettingsRepository: Sendable {
     public var profile: WritingProfile {
         get {
             let defaults = makeDefaults()
-            let tone = defaults.string(forKey: Key.tone).flatMap(Tone.init(rawValue:)) ?? .neutral
-            let style = defaults.string(forKey: Key.style).flatMap(WritingStyle.init(rawValue:)) ?? .clear
+            let tone = defaults.string(forKey: Key.tone).flatMap(Tone.init(rawValue:)) ?? .keepMine
+            let style = defaults.string(forKey: Key.style)
+                .flatMap(WritingStyle.init(rawValue:)) ?? .keepMine
             return WritingProfile(
                 tone: tone,
                 style: style,

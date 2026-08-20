@@ -550,6 +550,11 @@ struct PlainwordSegmentedControl<Value: Hashable>: View {
             RoundedRectangle(cornerRadius: containerRadius, style: .continuous)
                 .strokeBorder(PlainwordTheme.separator, lineWidth: 1)
         }
+        // A settings row's label claims `maxWidth: .infinity`, so an HStack splits the
+        // width between the two and the segments come back ellipsized — "Keep m…" next
+        // to "Professi…", which is the one thing a show-them-all control must not do.
+        // Its width is not negotiable; the label wraps to a second line instead.
+        .fixedSize(horizontal: true, vertical: false)
         .animation(PlainwordMotion.content, value: selection)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilityLabel)
