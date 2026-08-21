@@ -31,7 +31,7 @@ src/
     DownloadCta.jsx
     Footer.jsx
   demo/
-    scenes.js           # The three flows: Correct, Transform, Write
+    scenes.js           # The three flows: Correct, Rewrite, Write
     useScenePlayer.js   # The timeline that plays one scene
     Stage.jsx           # Fixed-size stage, scaled to fit; anchors the popover
     DemoWindow.jsx      # Mail / Slack / browser chrome around the edited field
@@ -99,7 +99,7 @@ Dismiss and Apply are real buttons: pressing one stops the script and hands the
 state to the reader (`manual` in `useScenePlayer`). Presses that end the flow —
 Apply, Dismiss — hand control back after the app's own beat, so the scene picks
 up again on its own. Controls the script is driving and the reader cannot act on
-(the quick-action chips, the Transform button mid-typing) render as stills with
+(the quick-action chips, the Rewrite button mid-typing) render as stills with
 no hover affordance, so nothing offers a press it will not honour.
 
 Below 640px the stage drops the app chrome and shows the field and the popover

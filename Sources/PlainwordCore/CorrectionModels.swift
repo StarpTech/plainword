@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Deliberately short. A tone set here is a *standing* preference applied to every
 /// edit, so anything wanted on one message and not the next — persuasive, empathetic,
-/// confident — belongs in Transform…, where it is asked for by name. What is left is
+/// confident — belongs in Rewrite…, where it is asked for by name. What is left is
 /// the pair people genuinely switch between: writing to a person, and writing to work.
 public enum Tone: String, CaseIterable, Codable, Identifiable, Sendable {
     /// The default. The other cases ask for a character the author did not write,

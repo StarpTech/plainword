@@ -1,23 +1,20 @@
 <div align="center">
-  <img src="docs/images/readme-hero.png" alt="Plainword — say what you mean, wherever you write" width="900">
+  <img src="docs/images/brand-icon.png" alt="Plainword" width="128">
+  <h1>Plainword</h1>
+  <p>A macOS menu-bar writing assistant. Say what you mean, wherever you write.</p>
 </div>
 
-Plainword is a macOS menu-bar writing assistant. It corrects, rewrites and transforms text
-in the app you are already writing in — text fields, browsers, Slack, Mail — and runs on the
-AI provider of your choice: a local Ollama model, your Codex login, or any OpenAI-compatible
-endpoint. There is no Plainword subscription.
+Plainword corrects, rewrites and transforms text in the app you are already writing in: text
+fields, browsers, Slack, Mail. It runs on the AI provider of your choice, a local Ollama
+model, your Codex login, or any OpenAI-compatible endpoint. There is no Plainword
+subscription.
 
-<div align="center">
-  <img src="docs/images/readme-shortcuts.png" alt="The review popover showing an inline diff, and the transform popover asking for an instruction" width="900">
-</div>
-
-- **`⌘F2` — review.** Works on the selection, or the paragraph at the cursor. Small fixes are
+- **`⌘F2` review.** Works on the selection, or the paragraph at the cursor. Small fixes are
   marked inline; larger rewrites arrive as a comparison you accept or dismiss.
-- **`⇧⌘F2` — transform.** Give your own instruction — *shorter*, *less formal*,
-  *keep the second sentence* — on the selection, or the whole focused field.
+- **`⇧⌘F2` transform.** Give your own instruction, *shorter*, *less formal*, *keep the second
+  sentence*, on the selection or the whole focused field.
 - **In your voice.** A tone, a style and standing instructions ("British English, no
-  semicolons") ride along with every request, together with the writing around your cursor,
-  so a reply in a thread is edited as a reply.
+  semicolons") ride along with every request, together with the writing around your cursor.
 
 ### Quiet by default
 
@@ -27,7 +24,7 @@ screen capture, any app can be excluded. Credentials live in the Keychain; with 
 text never leaves the Mac.
 
 > [!NOTE]
-> Early project. Each app exposes its text differently — where Plainword cannot read a field
+> Early project. Each app exposes its text differently. Where Plainword cannot read a field
 > safely, it leaves it alone.
 
 ### Install
@@ -75,7 +72,7 @@ make signing-identity  # Create a stable local signing identity (once)
 ```
 
 **Sign local builds once.** macOS records Accessibility and Keychain approval against an app's
-code signature. With no identity on the machine Xcode signs ad-hoc — a signature derived from
+code signature. With no identity on the machine Xcode signs ad-hoc, a signature derived from
 the binary, so it changes on every build and both approvals are revoked each time. Give the
 build any stable identity and they persist: either add an Apple ID under **Xcode → Settings →
 Accounts → Manage Certificates → + → Apple Development** (free accounts work), or run
@@ -83,8 +80,7 @@ Accounts → Manage Certificates → + → Apple Development** (free accounts wo
 reports which it used. After switching, run `make reset-accessibility` once and approve
 Plainword one final time.
 
-The interface follows the **Plainword Ink** design system — paper surfaces, ink-green accent,
+The interface follows the **Plainword Ink** design system: paper surfaces, ink-green accent,
 serif for prose, mono for machinery. Tokens live in
-[`DesignSystem.swift`](Sources/PlainwordApp/DesignSystem.swift); the README artwork is
-generated from [`docs/design`](docs/design).
+[`DesignSystem.swift`](Sources/PlainwordApp/DesignSystem.swift).
 </details>

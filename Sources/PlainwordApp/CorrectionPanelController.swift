@@ -190,7 +190,7 @@ private final class CorrectionPanelModel: ObservableObject {
         var showsPromptButton = false
         var showsPromptBackButton = false
         var showsSuggestionBackButton = false
-        var promptTitle = "Transform selection"
+        var promptTitle = "Rewrite selection"
         /// The prompt writes new text rather than changing text that is already there.
         var isComposing = false
         var contextReceipt: [ReadOnlyContextReceiptItem] = []
@@ -870,7 +870,7 @@ final class CorrectionPanelController {
             animated: isEnteringStreaming
         )
         if isEnteringStreaming {
-            // A review starts as a small marker, and a transform as a single line. The
+            // A review starts as a small marker, and a rewrite as a single line. The
             // side of the field that fit either one may not fit a growing answer, so the
             // panel picks its side again the moment text starts arriving.
             configurePlacement(near: anchor)
@@ -893,7 +893,7 @@ final class CorrectionPanelController {
         model.transition(to: .unchanged, correctedText: "")
         // The review starts as a tiny trigger, so its original above/below choice
         // may no longer fit once the full result appears. Re-evaluate placement with
-        // the result's actual size, matching the transform prompt's behavior.
+        // the result's actual size, matching the rewrite prompt's behavior.
         configurePlacement(near: anchor)
         model.setPointerEdge(verticalPlacement.pointerEdge)
         targetFrame = nil
@@ -1226,7 +1226,7 @@ final class CorrectionPanelController {
             contentHeight = 0
             showsFooter = false
         case .prompting:
-            // Composing drops the transform shortcuts, and with them their row.
+            // Composing drops the rewrite shortcuts, and with them their row.
             contentHeight = model.isComposing ? 82 : 114
         case .processing:
             // The italic aside plus the ink line drawing itself under it.
@@ -2157,7 +2157,7 @@ private struct CrossAppProposalView: View {
         )
         .onHover { hoveredTransformShortcut = $0 ? shortcut : nil }
         .animation(PlainwordMotion.content, value: isHovering)
-        .accessibilityHint("Transforms the selected text immediately")
+        .accessibilityHint("Rewrites the selected text immediately")
     }
 
     private var promptCaption: String {
@@ -2581,7 +2581,7 @@ private struct CrossAppProposalView: View {
                     onSubmitPrompt(model.promptText)
                 } label: {
                     PlainwordShortcutLabel(
-                        model.isComposing ? "Write" : "Transform",
+                        model.isComposing ? "Write" : "Rewrite",
                         shortcut: "↩",
                         shortcutOpacity: 0.7
                     )
@@ -2685,7 +2685,7 @@ private struct CrossAppProposalView: View {
         case .promptTrigger, .promptTriggerLoading, .applied: ""
         case .prompting:
             model.showsPromptBackButton
-                ? "Apply another transformation"
+                ? "Apply another rewrite"
                 : model.promptTitle
         case .processing, .streaming: "Improving…"
         case .ready:

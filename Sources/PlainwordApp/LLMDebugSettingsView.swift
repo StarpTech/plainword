@@ -44,7 +44,7 @@ struct LLMDebugSettingsView: View {
                 if logStore.entries.isEmpty {
                     emptyState(
                         title: "No LLM calls yet",
-                        message: "Review or transform some text, or test your provider connection."
+                        message: "Review or rewrite some text, or test your provider connection."
                     )
                 } else if visibleEntries.isEmpty {
                     emptyState(

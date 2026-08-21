@@ -72,10 +72,10 @@ export const SCENES = [
   },
 
   {
-    id: 'transform',
-    tab: 'Transform',
+    id: 'rewrite',
+    tab: 'Rewrite',
     shortcut: ['⇧⌘', 'F2'],
-    kicker: 'Transform…',
+    kicker: 'Rewrite…',
     blurb: 'Say what should change in your own words, or take one of the three shortcuts.',
     app: 'slack',
     pointer: 'bottom',
@@ -121,10 +121,10 @@ export const SCENES = [
       ['i', '. Could you clear your open review comments before then?'],
     ],
     prompting: {
-      title: 'Transform entire field',
+      title: 'Rewrite entire field',
       caption: 'How should this text change?',
       placeholder: 'Make it shorter, friendlier, translate it…',
-      submit: 'Transform',
+      submit: 'Rewrite',
       chips: ['Shorten', 'Friendlier', 'More formal'],
     },
     popover: {

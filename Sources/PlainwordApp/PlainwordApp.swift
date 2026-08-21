@@ -124,7 +124,7 @@ private struct PlainwordMenuView: View {
                         onReviewSelectionOrField()
                     }
                     MenuActionButton(
-                        title: "Transform…",
+                        title: "Rewrite…",
                         shortcut: settings.transformShortcut?.displayText
                     ) {
                         onTransformSelectionOrField()
@@ -416,7 +416,7 @@ private final class StatusBarController: NSObject, ObservableObject {
         menu.addItem(reviewItem)
 
         let transformItem = NSMenuItem(
-            title: "Transform Selection or Field…",
+            title: "Rewrite Selection or Field…",
             action: #selector(transformSelectionOrFieldFromContextMenu),
             keyEquivalent: ""
         )

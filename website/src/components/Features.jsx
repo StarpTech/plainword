@@ -38,7 +38,7 @@ const FEATURES = [
 
 const MENU_ITEMS = [
   { label: 'Review text', shortcut: '⌘F2' },
-  { label: 'Transform…', shortcut: '⇧⌘F2' },
+  { label: 'Rewrite…', shortcut: '⇧⌘F2' },
 ];
 
 function FeatureCard({ glyph, title, text, delay }) {

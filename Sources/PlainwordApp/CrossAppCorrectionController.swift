@@ -371,10 +371,10 @@ final class CrossAppCorrectionController: ObservableObject {
             return
         }
         guard accessibility.snapshotState(snapshot) == .unchanged else {
-            activity = .failure("The focused text changed before it could be transformed.")
+            activity = .failure("The focused text changed before it could be rewritten.")
             return
         }
-        // Nothing to transform in an empty field, so write into it instead.
+        // Nothing to rewrite in an empty field, so write into it instead.
         if snapshot.context.targetKind == .insertionPoint {
             presentComposePrompt(for: snapshot)
             return
@@ -718,21 +718,21 @@ final class CrossAppCorrectionController: ObservableObject {
         )
     }
 
-    /// A draft has not been inserted anywhere yet, so a transform of one is named by
+    /// A draft has not been inserted anywhere yet, so a rewrite of one is named by
     /// the text it acts on rather than by the empty field behind it.
     private static func transformPromptTitle(
         for snapshot: FocusedTextSnapshot,
         previousSuggestion: WritingSuggestion?
     ) -> String {
         if previousSuggestion?.kind == .composition {
-            return "Transform draft"
+            return "Rewrite draft"
         }
         return snapshot.context.targetKind == .document
-            ? "Transform entire field"
-            : "Transform selection"
+            ? "Rewrite entire field"
+            : "Rewrite selection"
     }
 
-    /// Names what a transform is working on, so a failure reads the same way whether the
+    /// Names what a rewrite is working on, so a failure reads the same way whether the
     /// text came from the field or from a draft waiting to be inserted.
     private static func transformSubject(previousSuggestion: WritingSuggestion?) -> String {
         previousSuggestion?.kind == .composition ? "draft" : "selected text"
@@ -1087,7 +1087,7 @@ final class CrossAppCorrectionController: ObservableObject {
         guard accessibility.snapshotState(snapshot) == .unchanged else {
             dismissProposal()
             let subject = Self.transformSubject(previousSuggestion: previousSuggestion)
-            activity = .failure("The \(subject) changed before it could be transformed.")
+            activity = .failure("The \(subject) changed before it could be rewritten.")
             return
         }
 
@@ -1138,7 +1138,7 @@ final class CrossAppCorrectionController: ObservableObject {
             previousSuggestion: previousSuggestion
         )
         let locale = promptLanguageIdentifier(for: editContext)
-        // Transforming a draft leaves it a draft: the field is still empty, so the
+        // Rewriting a draft leaves it a draft: the field is still empty, so the
         // result has no original in it to diff against or mark up.
         let isDraft = previousSuggestion?.kind == .composition
         let subject = Self.transformSubject(previousSuggestion: previousSuggestion)
@@ -1173,7 +1173,7 @@ final class CrossAppCorrectionController: ObservableObject {
                 pendingCorrectionText = nil
                 pendingSuggestion = nil
                 dismissProposalUI()
-                activity = .failure("The \(subject) changed before it could be transformed.")
+                activity = .failure("The \(subject) changed before it could be rewritten.")
                 return
             }
 
@@ -1968,7 +1968,7 @@ final class CrossAppCorrectionController: ObservableObject {
         guard isReady else {
             logger.debug(
                 """
-                Transform shortcut ignored: listening \(self.isListeningEnabled, privacy: .public), \
+                Rewrite shortcut ignored: listening \(self.isListeningEnabled, privacy: .public), \
                 accessibility \(self.isAccessibilityTrusted, privacy: .public), \
                 provider configured \(self.settings.isLLMConfigured, privacy: .public)
                 """
@@ -1986,7 +1986,7 @@ final class CrossAppCorrectionController: ObservableObject {
             presentCustomPrompt(for: snapshot)
             return
         }
-        // An empty field has nothing to transform, but it is the one place where an
+        // An empty field has nothing to rewrite, but it is the one place where an
         // instruction alone is enough to work from.
         if let snapshot = accessibility.captureFocusedInsertionPoint() {
             presentComposePrompt(for: snapshot)
@@ -2035,7 +2035,7 @@ final class CrossAppCorrectionController: ObservableObject {
                 .trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 else {
             // An empty field has nothing to review, but it is still somewhere the
             // author wants text. Both shortcuts lead here rather than only the one
-            // that happens to be for transforming.
+            // that happens to be for rewriting.
             if let composeSnapshot = accessibility.captureFocusedInsertionPoint() {
                 presentComposePrompt(for: composeSnapshot)
                 return

@@ -64,7 +64,7 @@ struct GeneralSettingsView: View {
             SettingsSection("Suggestions") {
                 SettingsRow(
                     "Suggestions",
-                    detail: "Enable explicit review and transform shortcuts."
+                    detail: "Enable explicit review and rewrite shortcuts."
                 ) {
                     Toggle("Suggestions", isOn: listeningBinding)
                         .labelsHidden()
@@ -88,8 +88,8 @@ struct GeneralSettingsView: View {
                 SettingsDivider()
 
                 SettingsRow(
-                    "Transform text",
-                    detail: "Opens transform mode for the selection or whole focused field."
+                    "Rewrite text",
+                    detail: "Opens rewrite mode for the selection or whole focused field."
                 ) {
                     PopoverShortcutRecorder(
                         shortcut: $settings.transformShortcut,

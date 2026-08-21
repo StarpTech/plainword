@@ -91,7 +91,7 @@ extension LLMDebugLogEntry {
     var taskLabel: String? {
         guard let content = authorMessage else { return nil }
         if content.contains("<write_instruction>") { return "Compose" }
-        if content.contains("<edit_instruction>") { return "Transform" }
+        if content.contains("<edit_instruction>") { return "Rewrite" }
         if content.contains("<text_to_edit>") { return "Correct" }
         return nil
     }

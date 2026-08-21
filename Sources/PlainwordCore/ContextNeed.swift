@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Every request used to receive the same allowance regardless of what it was for, which
 /// suited none of them: a draft at an empty caret has no target text at all — the writing
-/// around it is the entire input — while a whole-field transform already holds everything
+/// around it is the entire input — while a whole-field rewrite already holds everything
 /// it needs and only wants to know where it is.
 ///
 /// Budgets differ by side as well as by size. Writing continues forwards, so what comes
