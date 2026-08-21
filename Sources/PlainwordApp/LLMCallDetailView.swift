@@ -22,6 +22,7 @@ struct LLMCallDetailView: View {
     private enum Payload: Hashable {
         case message(Int)
         case request
+        case reasoning
         case response
     }
 
@@ -121,7 +122,7 @@ struct LLMCallDetailView: View {
                     if index > 0 {
                         Rectangle()
                             .fill(PlainwordTheme.separator)
-                            .frame(width: 1, height: 26)
+                            .frame(width: 1, height: separatorHeight)
                     }
                     measurementColumn(measurement)
                 }
@@ -146,13 +147,24 @@ struct LLMCallDetailView: View {
     private struct Measurement {
         let label: String
         let value: String
+        /// A second, quieter line under the figure, for a part of it worth naming. Only
+        /// the calls that have one grow the row; the rest read exactly as before.
+        let detail: String?
         /// Spelled out for VoiceOver, where "1.2 s" under "TTFB" has no reading order.
         let spokenValue: String
 
-        init(label: String, value: String?, spokenValue: String? = nil) {
+        init(
+            label: String,
+            value: String?,
+            detail: String? = nil,
+            spokenValue: String? = nil
+        ) {
             self.label = label
             self.value = value ?? "\u{2014}"
-            self.spokenValue = spokenValue ?? value ?? "not reported"
+            self.detail = detail
+            self.spokenValue = [spokenValue ?? value ?? "not reported", detail]
+                .compactMap { $0 }
+                .joined(separator: ", ")
         }
     }
 
@@ -171,9 +183,19 @@ struct LLMCallDetailView: View {
                 spokenValue: entry.duration.map { String(format: "%.2f seconds", $0) }
                     ?? (entry.isInProgress ? "still running" : nil)
             ),
-            Measurement(label: "Tokens", value: entry.tokenUsage?.compactDescription),
+            Measurement(
+                label: "Tokens",
+                value: entry.tokenUsage?.compactDescription,
+                detail: entry.tokenUsage?.thinkingDescription
+            ),
             Measurement(label: "Cache", value: entry.tokenUsage?.compactCacheDescription)
         ]
+    }
+
+    /// The rules stop where the figures do, so a call that reports a breakdown has
+    /// taller rules rather than short ones floating above a third line.
+    private var separatorHeight: CGFloat {
+        measurements.contains { $0.detail != nil } ? 38 : 26
     }
 
     private func measurementColumn(_ measurement: Measurement) -> some View {
@@ -187,6 +209,14 @@ struct LLMCallDetailView: View {
                 .textSelection(.enabled)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
+            if let detail = measurement.detail {
+                Text(detail)
+                    .font(PlainwordFont.mono(10))
+                    .foregroundStyle(PlainwordTheme.textSecondary)
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, 12)
@@ -234,12 +264,18 @@ struct LLMCallDetailView: View {
         .padding(.vertical, 11)
     }
 
+    /// Thinking sits between what was asked and what came back, which is the order it
+    /// happened in, and it is offered only when the provider reported some: a dead
+    /// choice on every call by a model that does not think is one more thing to aim past.
     private var payloadSegments: [PlainwordSegment<Payload>] {
         messageTabs.map { PlainwordSegment(Payload.message($0.index), $0.label) }
-            + [
-                PlainwordSegment(Payload.request, "Request"),
-                PlainwordSegment(Payload.response, "Response")
-            ]
+            + [PlainwordSegment(Payload.request, "Request")]
+            + (hasReasoning ? [PlainwordSegment(Payload.reasoning, "Thinking")] : [])
+            + [PlainwordSegment(Payload.response, "Response")]
+    }
+
+    private var hasReasoning: Bool {
+        !(entry.reasoning ?? "").isEmpty
     }
 
     @ViewBuilder
@@ -256,6 +292,12 @@ struct LLMCallDetailView: View {
                 title: "Request payload",
                 text: prettyPrintedJSON(entry.request.payloadJSON),
                 emptyMessage: "The request body was not recorded."
+            )
+        case .reasoning:
+            DebugPayloadPane(
+                title: "Thinking",
+                text: entry.reasoning ?? "",
+                emptyMessage: "This model reported no thinking."
             )
         case .response:
             DebugPayloadPane(

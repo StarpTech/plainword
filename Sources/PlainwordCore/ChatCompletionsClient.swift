@@ -103,6 +103,17 @@ struct ChatCompletionRequest: Encodable, Equatable, Sendable {
         }
     }
 
+    /// The gateway-style request for visible thinking.
+    ///
+    /// `reasoning_effort` says how hard to think and is understood everywhere; this says
+    /// the thinking should come back, and is understood by the gateways that can send it
+    /// (Vercel AI Gateway, OpenRouter, and the OpenAI-compatible surfaces that follow
+    /// them). The effort is repeated here because those gateways read it from this
+    /// object, and stating it twice cannot disagree with itself.
+    struct Reasoning: Encodable, Equatable, Sendable {
+        let effort: String
+    }
+
     struct StreamOptions: Encodable, Equatable, Sendable {
         let includeUsage: Bool
 
@@ -114,6 +125,7 @@ struct ChatCompletionRequest: Encodable, Equatable, Sendable {
     let model: String
     let messages: [Message]
     let reasoningEffort: String
+    let reasoning: Reasoning?
     let stream: Bool
     let streamOptions: StreamOptions?
     let responseFormat: ResponseFormat
@@ -122,6 +134,7 @@ struct ChatCompletionRequest: Encodable, Equatable, Sendable {
         model: String,
         messages: [Message],
         reasoningEffort: String,
+        reasoning: Reasoning? = nil,
         stream: Bool,
         streamOptions: StreamOptions? = nil,
         responseFormat: ResponseFormat
@@ -129,6 +142,7 @@ struct ChatCompletionRequest: Encodable, Equatable, Sendable {
         self.model = model
         self.messages = messages
         self.reasoningEffort = reasoningEffort
+        self.reasoning = reasoning
         self.stream = stream
         self.streamOptions = streamOptions
         self.responseFormat = responseFormat
@@ -138,6 +152,7 @@ struct ChatCompletionRequest: Encodable, Equatable, Sendable {
         case model
         case messages
         case reasoningEffort = "reasoning_effort"
+        case reasoning
         case stream
         case streamOptions = "stream_options"
         case responseFormat = "response_format"
@@ -170,10 +185,45 @@ private struct StructuredCorrection: Decodable, Equatable, Sendable {
     }
 }
 
+private enum ReasoningKeys: String, CodingKey {
+    case reasoningContent = "reasoning_content"
+    case reasoning
+}
+
+/// The model's thinking, wherever this provider decided to put it.
+///
+/// The names disagree across OpenAI-compatible servers: `reasoning_content` in most of
+/// them, `reasoning` in some gateways, and a structure rather than a string in others.
+/// Only plain text is read. Anything else is left to the response payload, which the
+/// call inspector already shows whole, because a half-read structure is worse than none.
+private func decodedReasoningText(from decoder: Decoder) -> String? {
+    guard let container = try? decoder.container(keyedBy: ReasoningKeys.self) else {
+        return nil
+    }
+    let content = (try? container.decodeIfPresent(
+        String.self,
+        forKey: .reasoningContent
+    )) ?? nil
+    let plain = (try? container.decodeIfPresent(String.self, forKey: .reasoning)) ?? nil
+    guard let text = content ?? plain, !text.isEmpty else { return nil }
+    return text
+}
+
 struct ChatCompletionResult: Decodable, Equatable, Sendable {
     struct Choice: Decodable, Equatable, Sendable {
         struct Message: Decodable, Equatable, Sendable {
             let content: String?
+            let reasoning: String?
+
+            private enum CodingKeys: String, CodingKey {
+                case content
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                content = try container.decodeIfPresent(String.self, forKey: .content)
+                reasoning = decodedReasoningText(from: decoder)
+            }
         }
 
         let message: Message
@@ -205,8 +255,19 @@ struct ProviderTokenUsage: Decodable, Equatable, Sendable {
     private let cacheCreationInputTokens: Int?
     private let cacheReadTokens: Int?
     private let cacheWriteTokens: Int?
+    private struct OutputTokenDetails: Decodable, Equatable, Sendable {
+        let reasoningTokens: Int?
+
+        private enum CodingKeys: String, CodingKey {
+            case reasoningTokens = "reasoning_tokens"
+        }
+    }
+
     private let promptTokenDetails: InputTokenDetails?
     private let inputTokenDetails: InputTokenDetails?
+    private let completionTokenDetails: OutputTokenDetails?
+    private let outputTokenDetails: OutputTokenDetails?
+    private let reasoningTokens: Int?
 
     private enum CodingKeys: String, CodingKey {
         case promptTokens = "prompt_tokens"
@@ -220,6 +281,9 @@ struct ProviderTokenUsage: Decodable, Equatable, Sendable {
         case cacheWriteTokens = "cache_write_tokens"
         case promptTokenDetails = "prompt_tokens_details"
         case inputTokenDetails = "input_tokens_details"
+        case completionTokenDetails = "completion_tokens_details"
+        case outputTokenDetails = "output_tokens_details"
+        case reasoningTokens = "reasoning_tokens"
     }
 
     var debugValue: LLMTokenUsage {
@@ -245,7 +309,12 @@ struct ProviderTokenUsage: Decodable, Equatable, Sendable {
             cacheWriteTokens: cacheCreationInputTokens
                 ?? cacheWriteTokens
                 ?? promptTokenDetails?.cacheWriteTokens
-                ?? inputTokenDetails?.cacheWriteTokens
+                ?? inputTokenDetails?.cacheWriteTokens,
+            // Chat Completions puts this under the completion details, the Responses
+            // shape under the output details, and a few providers at the top level.
+            reasoningTokens: completionTokenDetails?.reasoningTokens
+                ?? outputTokenDetails?.reasoningTokens
+                ?? reasoningTokens
         )
     }
 }
@@ -254,6 +323,17 @@ struct ChatCompletionStreamChunk: Decodable, Equatable, Sendable {
     struct Choice: Decodable, Equatable, Sendable {
         struct Delta: Decodable, Equatable, Sendable {
             let content: String?
+            let reasoning: String?
+
+            private enum CodingKeys: String, CodingKey {
+                case content
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                content = try container.decodeIfPresent(String.self, forKey: .content)
+                reasoning = decodedReasoningText(from: decoder)
+            }
         }
 
         let delta: Delta
@@ -263,12 +343,35 @@ struct ChatCompletionStreamChunk: Decodable, Equatable, Sendable {
     let usage: ProviderTokenUsage?
 }
 
-enum ChatCompletionStreamEvent: Equatable, Sendable {
-    case delta(String)
-    case deltaAndUsage(String, LLMTokenUsage)
-    case usage(LLMTokenUsage)
-    case done
-    case ignored
+/// One chunk of a streamed completion, read as the things a chunk can carry rather
+/// than as a case for each combination of them: providers mix answer text, reasoning,
+/// and usage across chunks as they please, and a case per pairing drops whichever part
+/// it has no room for. The names below are how the parser used to speak, kept because
+/// `.delta("Hello")` still reads better at a call site than a memberwise initializer.
+struct ChatCompletionStreamEvent: Equatable, Sendable {
+    var content: String?
+    var reasoning: String?
+    var usage: LLMTokenUsage?
+    var isDone = false
+
+    static let ignored = Self()
+    static let done = Self(isDone: true)
+
+    static func delta(_ content: String) -> Self {
+        Self(content: content)
+    }
+
+    static func deltaAndUsage(_ content: String, _ usage: LLMTokenUsage) -> Self {
+        Self(content: content, usage: usage)
+    }
+
+    static func reasoning(_ reasoning: String) -> Self {
+        Self(reasoning: reasoning)
+    }
+
+    static func usage(_ usage: LLMTokenUsage) -> Self {
+        Self(usage: usage)
+    }
 }
 
 private struct ProviderErrorEnvelope: Decodable {
@@ -351,6 +454,13 @@ public struct ChatCompletionsClient: Sendable {
                 throw ChatCompletionsClientError.invalidResponse
             }
             tokenUsage = result.usage?.debugValue
+            // One event with the whole of it: a response that is not streamed has no
+            // thinking to report until it has all arrived.
+            if let reasoning = result.choices.first?.message.reasoning {
+                await debugHandler?(
+                    .reasoning(id: prepared.debugRequest.id, delta: reasoning)
+                )
+            }
 
             let correction = try Self.decodeStructuredCorrection(
                 rawCorrection,
@@ -460,6 +570,14 @@ public struct ChatCompletionsClient: Sendable {
                             allowsExpansion: instruction != nil
                         )
                         tokenUsage = Self.tokenUsage(from: body)
+                        if let reasoning = Self.reasoningText(from: body) {
+                            await debugHandler?(
+                                .reasoning(
+                                    id: nextPrepared.debugRequest.id,
+                                    delta: reasoning
+                                )
+                            )
+                        }
                         await debugHandler?(
                             .succeeded(
                                 id: nextPrepared.debugRequest.id,
@@ -479,8 +597,19 @@ public struct ChatCompletionsClient: Sendable {
                     var finished = false
                     for try await line in bytes.lines {
                         try Task.checkCancellation()
-                        switch try Self.streamEvent(from: line) {
-                        case .delta(let content):
+                        let event = try Self.streamEvent(from: line)
+                        // Thinking is not part of the answer and is never accumulated
+                        // into it: it goes straight to the debug log, so the inspector
+                        // fills in while the model is still working.
+                        if let reasoning = event.reasoning {
+                            await debugHandler?(
+                                .reasoning(
+                                    id: nextPrepared.debugRequest.id,
+                                    delta: reasoning
+                                )
+                            )
+                        }
+                        if let content = event.content {
                             accumulated += content
                             guard (accumulated as NSString).length
                                 <= Self.maximumStructuredResponseUTF16Length(
@@ -489,22 +618,12 @@ public struct ChatCompletionsClient: Sendable {
                                 ) else {
                                 throw ChatCompletionsClientError.oversizedCorrection
                             }
-                        case .deltaAndUsage(let content, let usage):
-                            accumulated += content
+                        }
+                        if let usage = event.usage {
                             tokenUsage = usage
-                            guard (accumulated as NSString).length
-                                <= Self.maximumStructuredResponseUTF16Length(
-                                    for: text,
-                                    allowsExpansion: instruction != nil
-                                ) else {
-                                throw ChatCompletionsClientError.oversizedCorrection
-                            }
-                        case .usage(let usage):
-                            tokenUsage = usage
-                        case .done:
+                        }
+                        if event.isDone {
                             finished = true
-                        case .ignored:
-                            break
                         }
                         // The answer is structured, so what has arrived is usually not
                         // valid JSON yet. Publish as much of the corrected text as can
@@ -631,6 +750,10 @@ public struct ChatCompletionsClient: Sendable {
                 locale: locale
             ),
             reasoningEffort: settings.thinkingMode.rawValue,
+            // Nothing to send back when the model was told not to think.
+            reasoning: settings.includesThinking && settings.thinkingMode != .off
+                ? .init(effort: settings.thinkingMode.rawValue)
+                : nil,
             stream: stream,
             streamOptions: stream ? .init(includeUsage: true) : nil,
             responseFormat: .writingSuggestion(intent: intent)
@@ -711,15 +834,14 @@ public struct ChatCompletionsClient: Sendable {
         You are a writing editor. Revise only <text_to_edit> so it is correct, fluent, idiomatic, and recognizably the author's.
 
         Priorities, in order:
-        1. Preserve the author's intended meaning, facts, level of certainty, point of view, language, and emotional character.
-        2. Fix spelling, grammar, and punctuation, in every kind of text, including lowercase, unpunctuated, and fragmentary input. Correct what the author did not intend to write: a mistype such as "whazts" is an error and gets fixed. A spelling they chose is not an error, and replacing one is a tone edit under priority 4, not a correction.
-        3. Improve wording only when it is clearly awkward, literal, wordy, repetitive, or non-idiomatic. For English, use natural contemporary phrasing. Avoid generic, corporate, over-polished, or AI-sounding prose.
-        4. Apply the author preferences only when they do not conflict with priority 1. They alone set the register: how formal the result reads, and whether the author's own spellings, shorthand, and abbreviations are kept or standardized.
-        5. Make the smallest useful edit. Rewrite a sentence only when a focused edit cannot express the same meaning naturally. If the text is already natural, return it unchanged.
+        1. Keep the author's meaning, facts, level of certainty, point of view, language, and emotional character.
+        2. Make it correct and idiomatic: spelling, grammar, punctuation, word order, articles, prepositions, agreement, and phrasing carried over word for word from another language. Recast a sentence when no smaller fix makes it read naturally. This holds for every kind of text, including lowercase, unpunctuated, and fragmentary input. A mistype is an error; a spelling the author chose is not.
+        3. Follow <additional_author_instructions>, then <author_preferences>. They decide voice, register, and length, and nothing else. They never decide whether the text is correct, and a preference the text does not already meet is a reason to edit.
+        4. Make the smallest edit that does 1 to 3, and no more. Avoid generic, corporate, over-polished, or AI-sounding prose. If the text already meets 1 to 3, return it unchanged.
 
         \(taskScope)
 
-        Preserve the source's writing style, structure, and formatting exactly unless a correction strictly requires changing them. \(formattingPreservationRule)
+        Preserve the source's formatting and layout exactly unless an edit required above cannot be made without changing them. This rule governs the shape of the text on the page; the priorities govern its wording. \(formattingPreservationRule)
 
         Context is read-only. Use it only to understand meaning and resolve references, never as a source of text to copy into the result.
         - A pronoun may refer to the preceding context rather than the nearest noun in <text_to_edit>; when needed for clarity, replace it with its exact antecedent. If the context says "I built Project Atlas" and <text_to_edit> says "I disliked OtherApp; it runs locally", return "I disliked OtherApp; Project Atlas runs locally." Do not return "I disliked OtherApp because it runs locally."
@@ -1098,21 +1220,22 @@ public struct ChatCompletionsClient: Sendable {
         else {
             throw ChatCompletionsClientError.invalidResponse
         }
-        let content = chunk.choices.first?.delta.content
-        if let usage = chunk.usage {
-            if let content, !content.isEmpty {
-                return .deltaAndUsage(content, usage.debugValue)
-            }
-            return .usage(usage.debugValue)
-        }
-        guard let content, !content.isEmpty else {
-            return .ignored
-        }
-        return .delta(content)
+        let delta = chunk.choices.first?.delta
+        let content = delta?.content
+        return ChatCompletionStreamEvent(
+            content: (content?.isEmpty ?? true) ? nil : content,
+            reasoning: delta?.reasoning,
+            usage: chunk.usage?.debugValue
+        )
     }
 
     private static func tokenUsage(from data: Data) -> LLMTokenUsage? {
         (try? JSONDecoder().decode(ChatCompletionResult.self, from: data))?.usage?.debugValue
+    }
+
+    static func reasoningText(from data: Data) -> String? {
+        (try? JSONDecoder().decode(ChatCompletionResult.self, from: data))?
+            .choices.first?.message.reasoning
     }
 
     private static func redactedEndpoint(_ endpoint: URL) -> String {

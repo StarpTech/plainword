@@ -132,6 +132,10 @@ final class SettingsStore: ObservableObject {
         didSet { persistLLMSettings() }
     }
 
+    @Published var includesThinking: Bool {
+        didSet { persistLLMSettings() }
+    }
+
     @Published var apiKey: String {
         didSet {
             credentialState = apiKey.isEmpty ? .empty : .unsaved
@@ -217,6 +221,7 @@ final class SettingsStore: ObservableObject {
         authentication = storedSettings.authentication
         customHeaderName = storedSettings.customHeaderName
         thinkingMode = storedSettings.thinkingMode
+        includesThinking = storedSettings.includesThinking
         do {
             let storedKey = try apiKeyStore.read() ?? ""
             apiKey = storedKey
@@ -276,7 +281,8 @@ final class SettingsStore: ObservableObject {
             codexModel: codexModel,
             authentication: authentication,
             customHeaderName: customHeaderName,
-            thinkingMode: thinkingMode
+            thinkingMode: thinkingMode,
+            includesThinking: includesThinking
         )
     }
 

@@ -207,6 +207,43 @@ final class ChatCompletionsClientTests: XCTestCase {
         XCTAssertEqual(streamOptions["include_usage"] as? Bool, true)
     }
 
+    func testAsksForThinkingBackOnlyWhenTheSettingIsOn() throws {
+        let client = ChatCompletionsClient()
+        func payload(includesThinking: Bool, thinkingMode: ThinkingMode) throws -> [String: Any] {
+            let request = try client.makeRequest(
+                text: "Helo",
+                profile: WritingProfile(),
+                locale: "en-US",
+                settings: LLMSettings(
+                    endpoint: "https://example.com/v1/chat/completions",
+                    model: "provider-model",
+                    thinkingMode: thinkingMode,
+                    includesThinking: includesThinking
+                ),
+                apiKey: "test-key"
+            )
+            let body = try XCTUnwrap(request.httpBody)
+            return try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        }
+
+        // Off: nothing beyond the effort every provider understands, so an endpoint that
+        // rejects unknown arguments keeps working.
+        let quiet = try payload(includesThinking: false, thinkingMode: .high)
+        XCTAssertNil(quiet["reasoning"])
+        XCTAssertEqual(quiet["reasoning_effort"] as? String, "high")
+
+        // On: the gateway-shaped request, carrying the same effort it was already sent.
+        let asking = try payload(includesThinking: true, thinkingMode: .high)
+        XCTAssertEqual(asking["reasoning_effort"] as? String, "high")
+        XCTAssertEqual(
+            asking["reasoning"] as? [String: String],
+            ["effort": "high"]
+        )
+
+        // A model told not to think has no thinking to return.
+        XCTAssertNil(try payload(includesThinking: true, thinkingMode: .off)["reasoning"])
+    }
+
     func testDecodesStandardStreamingChunks() throws {
         XCTAssertEqual(
             try ChatCompletionsClient.streamEvent(
@@ -244,6 +281,36 @@ final class ChatCompletionsClientTests: XCTestCase {
         )
     }
 
+    func testDecodesReasoningUnderEitherProviderName() throws {
+        XCTAssertEqual(
+            try ChatCompletionsClient.streamEvent(
+                from: #"data: {"choices":[{"delta":{"reasoning_content":"Weighing "}}]}"#
+            ),
+            .reasoning("Weighing ")
+        )
+        XCTAssertEqual(
+            try ChatCompletionsClient.streamEvent(
+                from: #"data: {"choices":[{"delta":{"reasoning":"the tense."}}]}"#
+            ),
+            .reasoning("the tense.")
+        )
+        // Thinking and answer in one chunk: both are carried, neither replaces the other.
+        XCTAssertEqual(
+            try ChatCompletionsClient.streamEvent(
+                from: #"data: {"choices":[{"delta":{"reasoning_content":"Done.","content":"Hello"}}]}"#
+            ),
+            ChatCompletionStreamEvent(content: "Hello", reasoning: "Done.")
+        )
+        // A provider that answers with a structure rather than a string is not guessed
+        // at: the chunk still yields its content, and the response payload keeps the rest.
+        XCTAssertEqual(
+            try ChatCompletionsClient.streamEvent(
+                from: #"data: {"choices":[{"delta":{"reasoning":{"parts":["x"]},"content":"Hello"}}]}"#
+            ),
+            .delta("Hello")
+        )
+    }
+
     func testDecodesInputOutputAndCacheCreationUsageNames() throws {
         XCTAssertEqual(
             try ChatCompletionsClient.streamEvent(
@@ -266,6 +333,35 @@ final class ChatCompletionsClientTests: XCTestCase {
             .deltaAndUsage(
                 "Hello",
                 LLMTokenUsage(inputTokens: 12, outputTokens: 1, totalTokens: 13)
+            )
+        )
+    }
+
+    func testDecodesReasoningTokenCountsUnderEitherUsageShape() throws {
+        XCTAssertEqual(
+            try ChatCompletionsClient.streamEvent(
+                from: #"data: {"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":80,"total_tokens":200,"completion_tokens_details":{"reasoning_tokens":64}}}"#
+            ),
+            .usage(
+                LLMTokenUsage(
+                    inputTokens: 120,
+                    outputTokens: 80,
+                    totalTokens: 200,
+                    reasoningTokens: 64
+                )
+            )
+        )
+        XCTAssertEqual(
+            try ChatCompletionsClient.streamEvent(
+                from: #"data: {"choices":[],"usage":{"input_tokens":120,"output_tokens":80,"total_tokens":200,"output_tokens_details":{"reasoning_tokens":64}}}"#
+            ),
+            .usage(
+                LLMTokenUsage(
+                    inputTokens: 120,
+                    outputTokens: 80,
+                    totalTokens: 200,
+                    reasoningTokens: 64
+                )
             )
         )
     }
@@ -368,6 +464,128 @@ final class ChatCompletionsClientTests: XCTestCase {
                 cacheReadTokens: 96,
                 cacheWriteTokens: 32
             )
+        )
+    }
+
+    func testStreamedReasoningIsReportedToTheDebugLog() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StreamingURLProtocol.self]
+        let recorder = DebugEventRecorder()
+        let client = ChatCompletionsClient(
+            session: URLSession(configuration: configuration),
+            debugHandler: { event in
+                await recorder.record(event)
+            }
+        )
+
+        StreamingURLProtocol.handler = { request in
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "text/event-stream"]
+                )
+            )
+            let body = """
+            data: {"choices":[{"delta":{"reasoning_content":"Checking "}}]}
+
+            data: {"choices":[{"delta":{"reasoning_content":"the spelling."}}]}
+
+            data: {"choices":[{"delta":{"content":"{\\"corrected_text\\":\\"Hello world\\",\\"classification\\":\\"correction\\"}"}}]}
+
+            data: [DONE]
+
+            """
+            return (response, Data(body.utf8))
+        }
+
+        var updates: [CorrectionStreamEvent] = []
+        for try await update in client.streamCorrection(
+            text: "Helo world",
+            profile: WritingProfile(),
+            locale: "en-US",
+            settings: LLMSettings(
+                endpoint: "https://example.com/v1/chat/completions",
+                model: "provider-model"
+            ),
+            apiKey: "test-key"
+        ) {
+            updates.append(update)
+        }
+
+        XCTAssertEqual(
+            updates.last,
+            .completed(
+                CorrectionResponse(correctedText: "Hello world", classification: .correction)
+            )
+        )
+
+        let events = await recorder.events
+        guard case .started(let request) = events.first else {
+            return XCTFail("Expected a started debug event")
+        }
+        let reasoning = events.compactMap { event -> String? in
+            guard case let .reasoning(id, delta) = event, id == request.id else { return nil }
+            return delta
+        }
+        XCTAssertEqual(reasoning, ["Checking ", "the spelling."])
+
+        // Thinking is reported, never folded into the answer.
+        guard case let .succeeded(_, _, _, responseBody, _) = events.last else {
+            return XCTFail("Expected a succeeded debug event")
+        }
+        XCTAssertFalse(responseBody.contains("Checking"))
+    }
+
+    func testStandardResponseReasoningIsReportedToTheDebugLog() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StreamingURLProtocol.self]
+        let recorder = DebugEventRecorder()
+        let client = ChatCompletionsClient(
+            session: URLSession(configuration: configuration),
+            debugHandler: { event in
+                await recorder.record(event)
+            }
+        )
+
+        StreamingURLProtocol.handler = { request in
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            let body = #"{"choices":[{"message":{"reasoning_content":"Checking the spelling.","content":"{\"corrected_text\":\"Hello.\",\"classification\":\"correction\"}"}}]}"#
+            return (response, Data(body.utf8))
+        }
+
+        _ = try await client.correct(
+            text: "Helo.",
+            profile: WritingProfile(),
+            locale: "en-US",
+            settings: LLMSettings(
+                endpoint: "https://example.com/v1/chat/completions",
+                model: "provider-model"
+            ),
+            apiKey: "test-key"
+        )
+
+        let events = await recorder.events
+        guard case .started(let request) = events.first else {
+            return XCTFail("Expected a started debug event")
+        }
+        // One event with all of it: an unstreamed answer has nothing to report earlier.
+        XCTAssertEqual(
+            events.compactMap { event -> String? in
+                guard case let .reasoning(id, delta) = event, id == request.id else {
+                    return nil
+                }
+                return delta
+            },
+            ["Checking the spelling."]
         )
     }
 
@@ -648,12 +866,27 @@ final class ChatCompletionsClientTests: XCTestCase {
         XCTAssertEqual(messages.map(\.role), ["system", "user"])
         XCTAssertTrue(messages[0].content.contains("You are a writing editor"))
         XCTAssertTrue(messages[0].content.contains("Priorities, in order"))
-        XCTAssertTrue(messages[0].content.contains("Improve wording only when it is clearly awkward"))
-        XCTAssertTrue(messages[0].content.contains("For English, use natural contemporary phrasing"))
+        XCTAssertTrue(messages[0].content.contains("Make it correct and idiomatic"))
+        XCTAssertTrue(messages[0].content.contains(
+            "Recast a sentence when no smaller fix makes it read naturally"
+        ))
+        XCTAssertTrue(messages[0].content.contains(
+            "A mistype is an error; a spelling the author chose is not"
+        ))
+        // The one place the separation is stated: the preferences own voice, register,
+        // and length, and the priorities above them own correctness.
+        XCTAssertTrue(messages[0].content.contains(
+            "They decide voice, register, and length, and nothing else"
+        ))
+        XCTAssertTrue(messages[0].content.contains(
+            "a preference the text does not already meet is a reason to edit"
+        ))
         XCTAssertTrue(messages[0].content.contains("only when one ending follows directly and unambiguously"))
         XCTAssertTrue(messages[0].content.contains("If several endings are plausible, preserve the fragment"))
-        XCTAssertTrue(messages[0].content.contains("Make the smallest useful edit"))
-        XCTAssertTrue(messages[0].content.contains("If the text is already natural, return it unchanged"))
+        XCTAssertTrue(messages[0].content.contains("Make the smallest edit that does 1 to 3"))
+        XCTAssertTrue(messages[0].content.contains(
+            "If the text already meets 1 to 3, return it unchanged"
+        ))
         XCTAssertTrue(messages[0].content.contains(
             "never as a source of text to copy into the result"
         ))
@@ -662,7 +895,10 @@ final class ChatCompletionsClientTests: XCTestCase {
         XCTAssertTrue(messages[0].content.contains("Do not answer questions; edit their wording only"))
         XCTAssertTrue(messages[0].content.contains("Edit only <text_to_edit>"))
         XCTAssertTrue(messages[0].content.contains(
-            "Preserve the source's writing style, structure, and formatting exactly"
+            "Preserve the source's formatting and layout exactly"
+        ))
+        XCTAssertTrue(messages[0].content.contains(
+            "the priorities govern its wording"
         ))
         XCTAssertTrue(messages[0].content.contains(
             "Do not normalize, reflow, restyle, or reformat unaffected text"
@@ -719,8 +955,9 @@ final class ChatCompletionsClientTests: XCTestCase {
         XCTAssertTrue(instructions.contains(
             "including lowercase, unpunctuated, and fragmentary input"
         ))
-        XCTAssertTrue(instructions.contains("Correct what the author did not intend to write"))
-        XCTAssertTrue(instructions.contains("A spelling they chose is not an error"))
+        XCTAssertTrue(instructions.contains(
+            "A mistype is an error; a spelling the author chose is not"
+        ))
 
         // Register belongs to the author preferences, so the system prompt must carry
         // no verdict on it. A tone the user never selected cannot leak in from here.
@@ -1011,14 +1248,13 @@ final class ChatCompletionsClientTests: XCTestCase {
             locale: "en-US"
         )
         XCTAssertTrue(editing[1].content.contains(
-            "Tone: the author's own — match the tone of their existing writing, and never "
-                + "trade it for a smoother, warmer, or more neutral one. Keep their emoji, "
-                + "slang, abbreviations, and shorthand exactly as written; change one only "
-                + "when it is a spelling or grammar error rather than voice\n"
+            "Tone: the author's own — match the voice of their existing writing, "
+                + "including their emoji, slang, abbreviations, and shorthand, and never "
+                + "trade it for a smoother, warmer, or more neutral one\n"
         ))
         XCTAssertTrue(editing[1].content.contains(
             "Writing style: the author's own — keep the wording, rhythm, and sentence "
-                + "structure they already use, and leave phrasing that is already fine alone\n"
+                + "length they already use, and neither expand nor compress what they wrote\n"
         ))
         XCTAssertFalse(editing[1].content.contains("Tone: keepMine"))
         XCTAssertFalse(editing[1].content.contains("Writing style: keepMine"))
@@ -1034,14 +1270,13 @@ final class ChatCompletionsClientTests: XCTestCase {
             locale: "en-US"
         )
         XCTAssertTrue(composing[1].content.contains(
-            "Tone: the author's own — match the tone of their existing writing, and never "
-                + "trade it for a smoother, warmer, or more neutral one. Keep their emoji, "
-                + "slang, abbreviations, and shorthand exactly as written; change one only "
-                + "when it is a spelling or grammar error rather than voice\n"
+            "Tone: the author's own — match the voice of their existing writing, "
+                + "including their emoji, slang, abbreviations, and shorthand, and never "
+                + "trade it for a smoother, warmer, or more neutral one\n"
         ))
         XCTAssertTrue(composing[1].content.contains(
             "Writing style: the author's own — keep the wording, rhythm, and sentence "
-                + "structure they already use, and leave phrasing that is already fine alone\n"
+                + "length they already use, and neither expand nor compress what they wrote\n"
         ))
     }
 

@@ -110,13 +110,57 @@ struct WritingSettingsView: View {
                             .strokeBorder(PlainwordTheme.strongSeparator, lineWidth: 1)
                     }
                     .accessibilityLabel("Additional writing instructions")
+
+                    if showsThinkingHint {
+                        thinkingHint
+                    }
                 }
+                .animation(PlainwordMotion.content, value: showsThinkingHint)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
                 .plainwordCard(cornerRadius: PlainwordTheme.cardCornerRadius)
             }
         }
         .animation(PlainwordMotion.content, value: settings.spellingLanguageMode)
+    }
+
+    /// Instructions are followed more closely when the model reasons about them, but
+    /// thinking is off by default so suggestions come back quickly. The trade is only
+    /// worth raising once there are instructions for it to follow.
+    private var showsThinkingHint: Bool {
+        settings.thinkingMode == .off
+            && !settings.promptExtension
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+    }
+
+    private var thinkingHint: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "lightbulb")
+                .font(PlainwordFont.ui(11))
+                .foregroundStyle(PlainwordTheme.textTertiary)
+            Text(
+                "Thinking is off so suggestions stay fast. "
+                    + "Models follow these instructions more closely with it on."
+            )
+            .font(PlainwordFont.ui(11))
+            .lineSpacing(2)
+            .foregroundStyle(PlainwordTheme.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button("Turn on thinking") {
+                settings.thinkingMode = .low
+            }
+            .buttonStyle(PlainwordButtonStyle(.secondary))
+            .help("Sets thinking mode to Low. Provider settings has the full range.")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(
+            PlainwordTheme.raisedSurface,
+            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+        )
+        .transition(.opacity)
     }
 
     private var spellingModeDetail: String {

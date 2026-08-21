@@ -13,6 +13,7 @@ public struct SettingsRepository: Sendable {
         static let authentication = "llm.authentication"
         static let customHeaderName = "llm.customHeaderName"
         static let thinkingMode = "llm.thinkingMode"
+        static let includesThinking = "llm.includesThinking"
         static let contextEnrichmentEnabled = "context.enrichmentEnabled"
         static let spellingLanguageMode = "spelling.languageMode"
         static let fixedSpellingLanguage = "spelling.fixedLanguage"
@@ -59,7 +60,8 @@ public struct SettingsRepository: Sendable {
                 authentication: authentication,
                 customHeaderName: defaults.string(forKey: Key.customHeaderName) ?? "api-key",
                 thinkingMode: defaults.string(forKey: Key.thinkingMode)
-                    .flatMap(ThinkingMode.init(rawValue:)) ?? .off
+                    .flatMap(ThinkingMode.init(rawValue:)) ?? .off,
+                includesThinking: defaults.bool(forKey: Key.includesThinking)
             )
         }
         nonmutating set {
@@ -72,6 +74,7 @@ public struct SettingsRepository: Sendable {
             defaults.set(newValue.authentication.rawValue, forKey: Key.authentication)
             defaults.set(newValue.customHeaderName.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Key.customHeaderName)
             defaults.set(newValue.thinkingMode.rawValue, forKey: Key.thinkingMode)
+            defaults.set(newValue.includesThinking, forKey: Key.includesThinking)
             defaults.removeObject(forKey: "llm.sendsTemperature")
             defaults.removeObject(forKey: "llm.temperature")
         }

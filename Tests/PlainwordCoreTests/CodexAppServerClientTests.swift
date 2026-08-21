@@ -66,6 +66,48 @@ final class CodexAppServerClientTests: XCTestCase {
         XCTAssertTrue(transcript.contains("\"test-mcp\":{\"enabled\":false}"))
     }
 
+    func testReportsThinkingToTheDebugLog() async throws {
+        let launchLog = temporaryDirectory.appendingPathComponent("launch.log")
+        let executable = try makeFakeCodex(launchLog: launchLog)
+        let recorder = CodexDebugEventRecorder()
+        let client = CodexAppServerClient(
+            executableURL: executable,
+            requestTimeout: 2,
+            debugHandler: { event in
+                await recorder.record(event)
+            }
+        )
+
+        _ = try await client.correct(
+            text: "This is an connection test.",
+            profile: WritingProfile(),
+            locale: "en-US",
+            settings: LLMSettings(provider: .codex, codexModel: "test-model")
+        )
+
+        let events = await recorder.events
+        guard case .started(let request) = events.first else {
+            return XCTFail("Expected a started debug event")
+        }
+        // Codex reports the summary in pieces, with a marker where one paragraph of it
+        // ends; the log gets the assembled text once the turn is done.
+        XCTAssertEqual(
+            events.compactMap { event -> String? in
+                guard case let .reasoning(id, delta) = event, id == request.id else {
+                    return nil
+                }
+                return delta
+            },
+            ["Weighing the tense.\n\nChecking agreement."]
+        )
+
+        // What the thinking cost, which is the only part of it some providers report.
+        guard case let .succeeded(_, _, _, _, tokenUsage) = events.last else {
+            return XCTFail("Expected a succeeded debug event")
+        }
+        XCTAssertEqual(tokenUsage?.reasoningTokens, 6)
+    }
+
     func testShutdownTerminatesAppServerAndPreventsRestart() async throws {
         let launchLog = temporaryDirectory.appendingPathComponent("launch.log")
         let executable = try makeFakeCodex(launchLog: launchLog)
@@ -287,8 +329,12 @@ final class CodexAppServerClientTests: XCTestCase {
               ;;
             *'"method":"turn/start"'*)
               printf '{"id":%s,"result":{"turn":{"id":"turn-1"}}}\\n' "$request_id"
+              printf '%s\\n' '{"method":"item/reasoning/summaryTextDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"item-0","delta":"Weighing "}}'
+              printf '%s\\n' '{"method":"item/reasoning/summaryTextDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"item-0","delta":"the tense."}}'
+              printf '%s\\n' '{"method":"item/reasoning/summaryPartAdded","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"item-0"}}'
+              printf '%s\\n' '{"method":"item/reasoning/summaryTextDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"item-0","delta":"Checking agreement."}}'
               printf '%s\\n' '{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"item-1","delta":"{\\"corrected_text\\":\\"This is a connection test.\\",\\"classification\\":\\"correction\\"}"}}'
-              printf '%s\\n' '{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"last":{"inputTokens":42,"outputTokens":9,"totalTokens":51,"cachedInputTokens":20,"cacheWriteInputTokens":0},"total":{"inputTokens":42,"outputTokens":9,"totalTokens":51,"cachedInputTokens":20,"cacheWriteInputTokens":0}}}}'
+              printf '%s\\n' '{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"last":{"inputTokens":42,"outputTokens":9,"totalTokens":51,"cachedInputTokens":20,"cacheWriteInputTokens":0,"reasoningOutputTokens":6},"total":{"inputTokens":42,"outputTokens":9,"totalTokens":51,"cachedInputTokens":20,"cacheWriteInputTokens":0}}}}'
               printf '%s\\n' '{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":1,"item":{"id":"item-1","type":"agentMessage","text":"{\\"corrected_text\\":\\"This is a connection test.\\",\\"classification\\":\\"correction\\"}","phase":"final_answer"}}}'
               printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed","items":[]}}}'
               ;;
@@ -334,5 +380,13 @@ final class CodexAppServerClientTests: XCTestCase {
             try? await Task.sleep(for: .milliseconds(20))
         }
         return false
+    }
+}
+
+private actor CodexDebugEventRecorder {
+    private(set) var events: [LLMCallDebugEvent] = []
+
+    func record(_ event: LLMCallDebugEvent) {
+        events.append(event)
     }
 }

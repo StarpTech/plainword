@@ -27,14 +27,17 @@ public enum Tone: String, CaseIterable, Codable, Identifiable, Sendable {
     /// model already knows what "friendly" asks for — but a bare `keepMine` reads as
     /// no preference at all, which leaves the model free to settle into a voice of its
     /// own. So it states the instruction instead of naming a value.
+    ///
+    /// It says nothing about correctness. The editor prompt already ranks preferences
+    /// below being correct and idiomatic, and a preference that repeats the boundary
+    /// is one more thing to keep in agreement with the prompt that decides it.
     var promptDescription: String {
         switch self {
         case .keepMine:
             """
-            the author's own — match the tone of their existing writing, and never \
-            trade it for a smoother, warmer, or more neutral one. Keep their emoji, \
-            slang, abbreviations, and shorthand exactly as written; change one only \
-            when it is a spelling or grammar error rather than voice
+            the author's own — match the voice of their existing writing, including \
+            their emoji, slang, abbreviations, and shorthand, and never trade it for \
+            a smoother, warmer, or more neutral one
             """
         default:
             rawValue
@@ -66,14 +69,14 @@ public enum WritingStyle: String, CaseIterable, Codable, Identifiable, Sendable 
     }
 
     /// See `Tone.promptDescription`. `detailed` is bounded because the editor prompt
-    /// asks for the smallest useful edit: read bare, it invites the model to pad every
-    /// sentence it touches, which is the one way this preference could do harm.
+    /// asks for the smallest edit that does the job: read bare, it invites the model to
+    /// pad every sentence it touches, which is the one way this preference could do harm.
     var promptDescription: String {
         switch self {
         case .keepMine:
             """
-            the author's own — keep the wording, rhythm, and sentence structure they \
-            already use, and leave phrasing that is already fine alone
+            the author's own — keep the wording, rhythm, and sentence length they \
+            already use, and neither expand nor compress what they wrote
             """
         case .detailed:
             """
@@ -189,6 +192,14 @@ public struct LLMSettings: Codable, Equatable, Sendable {
     public var authentication: ProviderAuthentication
     public var customHeaderName: String
     public var thinkingMode: ThinkingMode
+    /// Whether to ask the provider to send the model's thinking back with the answer.
+    ///
+    /// Off by default, and a choice rather than a default, because asking is not free:
+    /// gateways that support it take a `reasoning` object the OpenAI API itself rejects
+    /// as an unknown argument, which would fail every call for anyone pointed straight
+    /// at it. It changes nothing about how hard the model thinks — only whether the
+    /// thinking comes back where the call inspector can show it.
+    public var includesThinking: Bool
 
     public init(
         provider: LLMProvider = .openAICompatible,
@@ -198,7 +209,8 @@ public struct LLMSettings: Codable, Equatable, Sendable {
         codexModel: String = "",
         authentication: ProviderAuthentication = .bearer,
         customHeaderName: String = "api-key",
-        thinkingMode: ThinkingMode = .off
+        thinkingMode: ThinkingMode = .off,
+        includesThinking: Bool = false
     ) {
         self.provider = provider
         self.endpoint = endpoint
@@ -208,6 +220,7 @@ public struct LLMSettings: Codable, Equatable, Sendable {
         self.authentication = authentication
         self.customHeaderName = customHeaderName
         self.thinkingMode = thinkingMode
+        self.includesThinking = includesThinking
     }
 
     public var resolvedEndpoint: String {

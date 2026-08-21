@@ -47,19 +47,24 @@ public struct LLMTokenUsage: Equatable, Sendable {
     public let totalTokens: Int?
     public let cacheReadTokens: Int?
     public let cacheWriteTokens: Int?
+    /// The part of the output spent on thinking, for providers that break it out. It is
+    /// counted inside `outputTokens`, not alongside it, so the two never add up.
+    public let reasoningTokens: Int?
 
     public init(
         inputTokens: Int? = nil,
         outputTokens: Int? = nil,
         totalTokens: Int? = nil,
         cacheReadTokens: Int? = nil,
-        cacheWriteTokens: Int? = nil
+        cacheWriteTokens: Int? = nil,
+        reasoningTokens: Int? = nil
     ) {
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
         self.totalTokens = totalTokens
         self.cacheReadTokens = cacheReadTokens
         self.cacheWriteTokens = cacheWriteTokens
+        self.reasoningTokens = reasoningTokens
     }
 }
 
@@ -68,6 +73,12 @@ public enum LLMCallDebugEvent: Equatable, Sendable {
     /// The moment the provider's first response byte arrived, which is what separates a
     /// slow model from a slow connection. Only sent by transports that can observe it.
     case firstByte(id: UUID, at: Date)
+    /// The next piece of the model's thinking, for providers that return it.
+    ///
+    /// Each event carries what has arrived since the last one, never the whole, so a
+    /// transport that streams reasoning can send it as it is written and one that only
+    /// sees it at the end can send it in a single event.
+    case reasoning(id: UUID, delta: String)
     case succeeded(
         id: UUID,
         completedAt: Date,

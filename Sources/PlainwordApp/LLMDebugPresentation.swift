@@ -182,6 +182,12 @@ extension LLMTokenUsage {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
+    /// The thinking share of the output, kept apart from `compactDescription` because
+    /// it is a breakdown of the figure beside it rather than another figure to add up.
+    var thinkingDescription: String? {
+        reasoningTokens.map { "\($0.formatted()) thinking" }
+    }
+
     var compactCacheDescription: String? {
         var parts: [String] = []
         if let cacheReadTokens {

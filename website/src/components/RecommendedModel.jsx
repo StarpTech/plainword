@@ -101,8 +101,8 @@ export default function RecommendedModel() {
         ))}
       </div>
       <Reveal delay={200} className="mt-8 text-center text-xs text-ink-faint">
-        Timing measured on an Apple silicon MacBook Pro with the model loaded; pricing is
-        Google&rsquo;s at the time of writing.
+        Timing measured on an Apple silicon MacBook Pro with the model loaded. Hosted pricing is
+        whatever your provider charges.
       </Reveal>
     </Section>
   );

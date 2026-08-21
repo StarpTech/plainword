@@ -13,6 +13,10 @@ struct LLMDebugLogEntry: Identifiable {
     var firstByteAt: Date?
     var completedAt: Date?
     var state: State
+    /// The model's thinking, assembled from however many pieces the provider sent.
+    /// `nil` when it reported none, which is most providers and every model with
+    /// thinking turned off.
+    var reasoning: String?
     var responseBody: String?
     var tokenUsage: LLMTokenUsage?
 
@@ -34,6 +38,10 @@ final class LLMDebugLogStore: ObservableObject {
 
     private let maximumEntryCount: Int
 
+    /// Thinking can run longer than the answer several times over, and a hundred calls
+    /// are held in memory at once, so it is kept to the same ceiling as a response body.
+    private static let maximumReasoningCharacterCount = 65_536
+
     init(maximumEntryCount: Int = 100) {
         self.maximumEntryCount = maximumEntryCount
     }
@@ -48,6 +56,7 @@ final class LLMDebugLogStore: ObservableObject {
                     firstByteAt: nil,
                     completedAt: nil,
                     state: .inProgress,
+                    reasoning: nil,
                     responseBody: nil,
                     tokenUsage: nil
                 ),
@@ -61,6 +70,16 @@ final class LLMDebugLogStore: ObservableObject {
             guard let index = entries.firstIndex(where: { $0.id == id }),
                   entries[index].firstByteAt == nil else { return }
             entries[index].firstByteAt = at
+
+        case let .reasoning(id, delta):
+            guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+            let existing = entries[index].reasoning ?? ""
+            let limit = Self.maximumReasoningCharacterCount
+            guard existing.count < limit else { return }
+            let appended = existing + delta
+            entries[index].reasoning = appended.count <= limit
+                ? appended
+                : String(appended.prefix(limit)) + "\n\n… thinking truncated …"
 
         case let .succeeded(id, completedAt, statusCode, responseBody, tokenUsage):
             guard let index = entries.firstIndex(where: { $0.id == id }) else { return }

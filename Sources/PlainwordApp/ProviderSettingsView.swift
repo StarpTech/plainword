@@ -73,6 +73,24 @@ struct ProviderSettingsView: View {
                     .controlSize(.regular)
                     .frame(width: 130, alignment: .trailing)
                 }
+
+                if settings.provider != .codex {
+                    SettingsRow(
+                        "Return thinking",
+                        detail: "Asks the provider to send the model\u{2019}s reasoning "
+                            + "back with the answer, where the call inspector can show "
+                            + "it. Gateways such as Vercel AI Gateway and OpenRouter "
+                            + "support this; OpenAI\u{2019}s own API rejects the "
+                            + "request, so leave it off when pointed straight at it."
+                    ) {
+                        Toggle("Return thinking", isOn: $settings.includesThinking)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            .tint(PlainwordTheme.accent)
+                            .disabled(settings.thinkingMode == .off)
+                    }
+                }
             }
 
             connectionCard

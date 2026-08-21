@@ -246,9 +246,12 @@ public actor CodexAppServerClient {
 
     private struct TurnResult: Sendable {
         let text: String
+        /// The model's thinking, as far as Codex reported it. Empty when the turn
+        /// produced none, or when the configured summary setting withheld it.
+        let reasoning: String
         let usage: LLMTokenUsage?
         /// When the agent produced its first output, the local stand-in for a network
-        /// time to first byte.
+        /// time to first byte. Thinking counts: it is the first thing the model writes.
         let firstOutputAt: Date?
     }
 
@@ -256,6 +259,7 @@ public actor CodexAppServerClient {
         var turnID: String?
         var firstOutputAt: Date?
         var streamedText = ""
+        var reasoning = ""
         var partialText = ""
         var finalText: String?
         var usage: LLMTokenUsage?
@@ -433,6 +437,11 @@ public actor CodexAppServerClient {
                     if let firstOutputAt = result.firstOutputAt {
                         await debugHandler?(
                             .firstByte(id: debugRequest.id, at: firstOutputAt)
+                        )
+                    }
+                    if !result.reasoning.isEmpty {
+                        await debugHandler?(
+                            .reasoning(id: debugRequest.id, delta: result.reasoning)
                         )
                     }
                     await debugHandler?(
@@ -955,6 +964,21 @@ public actor CodexAppServerClient {
             }
             activeTurns[threadID] = turn
 
+        // Codex reports thinking three ways: the summary it writes for the reader, the
+        // raw thinking behind it, and a marker between summary paragraphs. All three are
+        // the same story to a reader of the debug log, so they are appended in order.
+        case "item/reasoning/summaryTextDelta", "item/reasoning/textDelta":
+            guard let delta = params["delta"]?.stringValue,
+                  var turn = activeTurns[threadID] else { return }
+            turn.firstOutputAt = turn.firstOutputAt ?? Date()
+            turn.reasoning += delta
+            activeTurns[threadID] = turn
+
+        case "item/reasoning/summaryPartAdded":
+            guard var turn = activeTurns[threadID], !turn.reasoning.isEmpty else { return }
+            turn.reasoning += "\n\n"
+            activeTurns[threadID] = turn
+
         case "item/completed":
             guard let item = params["item"],
                   item["type"]?.stringValue == "agentMessage",
@@ -975,7 +999,8 @@ public actor CodexAppServerClient {
                 outputTokens: breakdown["outputTokens"]?.integerValue,
                 totalTokens: breakdown["totalTokens"]?.integerValue,
                 cacheReadTokens: breakdown["cachedInputTokens"]?.integerValue,
-                cacheWriteTokens: breakdown["cacheWriteInputTokens"]?.integerValue
+                cacheWriteTokens: breakdown["cacheWriteInputTokens"]?.integerValue,
+                reasoningTokens: breakdown["reasoningOutputTokens"]?.integerValue
             )
             activeTurns[threadID] = turn
 
@@ -1000,6 +1025,7 @@ public actor CodexAppServerClient {
                 activeTurn.continuation.resume(
                     returning: TurnResult(
                         text: text,
+                        reasoning: activeTurn.reasoning,
                         usage: activeTurn.usage,
                         firstOutputAt: activeTurn.firstOutputAt
                     )
