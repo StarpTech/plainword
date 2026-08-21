@@ -20,9 +20,9 @@ export default function Hero() {
 
         <Reveal delay={60}>
           <h1 className="relative z-10 mx-auto mb-5 text-display text-balance">
-            Say what you mean,
+            Your little helper,
             <br />
-            wherever you write<span className="text-accent">.</span>
+            everywhere you write<span className="text-accent">.</span>
           </h1>
         </Reveal>
 
