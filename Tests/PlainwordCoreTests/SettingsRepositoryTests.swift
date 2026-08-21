@@ -25,6 +25,18 @@ final class SettingsRepositoryTests: XCTestCase {
             repository.spellingLanguageSettings,
             SpellingLanguageSettings()
         )
+        XCTAssertFalse(repository.isContextEnrichmentEnabled)
+    }
+
+    func testContextEnrichmentSettingRoundTrips() {
+        let repository = SettingsRepository(suiteName: suiteName)
+        repository.isContextEnrichmentEnabled = true
+
+        XCTAssertTrue(SettingsRepository(suiteName: suiteName).isContextEnrichmentEnabled)
+
+        repository.isContextEnrichmentEnabled = false
+
+        XCTAssertFalse(SettingsRepository(suiteName: suiteName).isContextEnrichmentEnabled)
     }
 
     func testProfileAndSettingsRoundTrip() {

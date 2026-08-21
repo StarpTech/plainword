@@ -712,9 +712,9 @@ public struct ChatCompletionsClient: Sendable {
 
         Priorities, in order:
         1. Preserve the author's intended meaning, facts, level of certainty, point of view, language, and emotional character.
-        2. Fix spelling, grammar, and punctuation. Do this in casual, slang, lowercase, and fragmentary text too: informality is voice, a misspelled word is not. Keep a non-standard spelling only when it is an established informal form ("gonna", "kinda", "ur", "sup", "lol") or clearly deliberate; a mistyped word such as "whazts" is an error and gets fixed.
+        2. Fix spelling, grammar, and punctuation, in every kind of text, including lowercase, unpunctuated, and fragmentary input. Correct what the author did not intend to write: a mistype such as "whazts" is an error and gets fixed. A spelling they chose is not an error, and replacing one is a tone edit under priority 4, not a correction.
         3. Improve wording only when it is clearly awkward, literal, wordy, repetitive, or non-idiomatic. For English, use natural contemporary phrasing. Avoid generic, corporate, over-polished, or AI-sounding prose.
-        4. Apply the author preferences only when they do not conflict with priority 1.
+        4. Apply the author preferences only when they do not conflict with priority 1. They alone set the register: how formal the result reads, and whether the author's own spellings, shorthand, and abbreviations are kept or standardized.
         5. Make the smallest useful edit. Rewrite a sentence only when a focused edit cannot express the same meaning naturally. If the text is already natural, return it unchanged.
 
         \(taskScope)
@@ -779,11 +779,13 @@ public struct ChatCompletionsClient: Sendable {
         2. Apply every concrete constraint, including sentence count, length, format, \
         structure, tone, point of view, and language. A request for "one sentence" \
         means exactly one sentence.
-        3. Apply the author preferences and any saved additional author instructions \
+        3. Fit the destination: the form, conventions, and usual length that the \
+        read-only context shows this field expects.
+        4. Apply the author preferences and any saved additional author instructions \
         when they do not conflict with the write instruction.
-        4. Sound like a person writing in the moment. Avoid generic, corporate, \
+        5. Sound like a person writing in the moment. Avoid generic, corporate, \
         over-polished, or AI-sounding prose.
-        5. Keep it short unless the instruction asks for length. When the length is \
+        6. Keep it short unless the instruction asks for length. When the length is \
         unstated, prefer the shortest text that does the job.
 
         <write_instruction> is trusted and defines what to write.
@@ -796,6 +798,22 @@ public struct ChatCompletionsClient: Sendable {
         - Return the text itself, with no greeting to the author, no surrounding \
         quotation marks, and no explanation of choices.
         - Do not answer the instruction as a question. Write the text it asks for.
+
+        <destination> describes where the text is going: the application, what the \
+        field is called, and what the interface says about it. Infer from that \
+        evidence what kind of text belongs there, and write something that would look \
+        native in that spot.
+        - Adopt only the conventions the destination actually implies. A composed \
+        message opens and closes; a comment, a title field, or a cell does not.
+        - Supply a structural part only when the destination shows it is missing. If a \
+        subject, a recipient, or a signature is a separate field of its own, do not \
+        restate it in this one.
+        - Match the length and register of the writing already around the field before \
+        assuming any of your own.
+        - When the destination does not say what kind of writing this is, write plain \
+        prose and add no conventions to it.
+        - <write_instruction> outranks the destination. When it asks for something the \
+        destination would not normally hold, write what it asks for.
 
         \(outputContract("the text to write", classifiedAs: "rewrite"))
         """
@@ -850,6 +868,7 @@ public struct ChatCompletionsClient: Sendable {
         - Preserve the language or languages used in <text_to_edit> unless <edit_instruction> explicitly requests translation or a language change.
         \(untrustedInputRule(includesEditTarget: true))
         - Edit only <text_to_edit>. Do not invent unsupported facts.
+        - <destination> describes where the text is going. Use it only to settle a choice <edit_instruction> leaves open, such as which form or convention a requested change should take, and never as a reason to restyle, reformat, or add to text the instruction did not ask you to change.
 
         Classify the result as "rewrite" if it changes length, structure, tone, point of view, language, or more than a few isolated words; otherwise use "correction".\(forbidCompletionRule(intent: intent))
 
@@ -963,19 +982,37 @@ public struct ChatCompletionsClient: Sendable {
         leadingContext: String,
         trailingContext: String
     ) -> String {
-        let structuredApplicationContext = applicationContextFragments.compactMap {
-            taggedBlock($0.kind.promptTag, value: $0.text)
+        // Some of these fragments name the place the writing is going and the rest is
+        // material found near it, which is a distinction the prompts act on. Sent as a
+        // flat run of sibling tags it is one the model has to reconstruct; grouped, the
+        // destination is a thing the instructions can refer to by name.
+        var destinationBlocks: [String] = []
+        var contentBlocks: [String] = []
+        for fragment in applicationContextFragments {
+            guard let block = taggedBlock(fragment.kind.promptTag, value: fragment.text)
+            else { continue }
+            if fragment.kind.describesDestination {
+                destinationBlocks.append(block)
+            } else {
+                contentBlocks.append(block)
+            }
         }
+        let destination = destinationBlocks.isEmpty ? nil : """
+        <destination>
+        \(destinationBlocks.joined(separator: "\n"))
+        </destination>
+        """
         let legacyApplicationContext = applicationContextFragments.isEmpty
             ? [taggedBlock("read_only_application_context", value: applicationContext)]
-                .compactMap { $0 }
             : []
-        return (structuredApplicationContext + legacyApplicationContext + [
-            taggedBlock("context_before", value: leadingContext),
-            taggedBlock("context_after", value: trailingContext)
-        ])
-        .compactMap { $0 }
-        .joined(separator: "\n\n")
+        let blocks: [String?] = [destination]
+            + contentBlocks.map { Optional($0) }
+            + legacyApplicationContext
+            + [
+                taggedBlock("context_before", value: leadingContext),
+                taggedBlock("context_after", value: trailingContext)
+            ]
+        return blocks.compactMap { $0 }.joined(separator: "\n\n")
     }
 
     private static func taggedBlock(_ tag: String, value: String) -> String? {
@@ -990,6 +1027,7 @@ public struct ChatCompletionsClient: Sendable {
     /// Every tag name this prompt format gives a meaning to.
     private static let reservedPromptTags: [String] =
         ReadOnlyContextKind.allCases.map(\.promptTag) + [
+            "destination",
             "text_to_edit",
             "edit_instruction",
             "author_preferences",

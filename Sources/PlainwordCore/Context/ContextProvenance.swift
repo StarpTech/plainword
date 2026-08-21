@@ -9,8 +9,11 @@ public enum ContextTier: Int, Comparable, CaseIterable, Sendable {
     case passage = 1
     /// Structure: transcripts and landmarks, found by role rather than position.
     case structure = 2
-    /// Geometry: whatever proximity can turn up. The last resort.
-    case proximity = 3
+    /// The screen: what the application says it drew where. Geometry, but the
+    /// application's own arithmetic rather than this one's.
+    case screen = 3
+    /// Geometry: whatever proximity can turn up by walking. The last resort.
+    case proximity = 4
 
     public static func < (lhs: Self, rhs: Self) -> Bool {
         lhs.rawValue < rhs.rawValue

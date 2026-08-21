@@ -1,11 +1,13 @@
 /**
  * The three flows the demo plays out, in the app's own vocabulary.
  *
- * Every label here is the string the shipped app actually shows
- * (CorrectionPanelController.swift): the header titles and details, the prompt
- * captions and placeholders, the section labels and the accept-button titles.
- * If a label changes in the app, change it here too rather than inventing a
- * marketing variant.
+ * Every label here is the string the shipped app actually shows: the header
+ * titles and details, the prompt captions and placeholders, the section labels
+ * and the accept-button titles come from CorrectionPanelController.swift, and
+ * the receipt row titles from ReadOnlyContextReceipt.swift. A receipt row's
+ * value is the content itself, flattened to one line, because that is what the
+ * app puts there — not a description of what it found. If a label changes in
+ * the app, change it here too rather than inventing a marketing variant.
  */
 
 /** Diff segments: ["u", text] unchanged, ["r", text] removed, ["i", text] inserted. */
@@ -58,9 +60,13 @@ export const SCENES = [
     receipt: {
       app: 'Mail',
       rows: [
-        ['FIELD', 'Message body'],
-        ['DOCUMENT', 'Re: Q3 report'],
-        ['NEARBY', '2 earlier messages in thread'],
+        ['App', 'Mail'],
+        ['Field label', 'Message body'],
+        ['Title', 'Re: Q3 report'],
+        [
+          'Around your text',
+          'Hi Dana — thanks for the notes, I folded most of them in this afternoon. … Best, Sam',
+        ],
       ],
     },
   },
@@ -132,9 +138,13 @@ export const SCENES = [
     receipt: {
       app: 'Slack',
       rows: [
-        ['FIELD', 'Message #q3-launch'],
-        ['DOCUMENT', '#q3-launch'],
-        ['NEARBY', '2 earlier messages in channel'],
+        ['App', 'Slack'],
+        ['Placeholder', 'Message #q3-launch'],
+        ['Title', '#q3-launch — Acme'],
+        [
+          'Text above',
+          'Milo Kranz: Two reviews are still open on my side, so probably not. Dana Whitfield: Then someone should tell the channel…',
+        ],
       ],
     },
   },
@@ -182,7 +192,7 @@ export const SCENES = [
     popover: {
       title: 'Draft',
       detail: 'New text',
-      label: 'New text',
+      label: 'Draft',
       accept: 'Insert',
       segmented: false,
     },
@@ -190,9 +200,13 @@ export const SCENES = [
     receipt: {
       app: 'Chrome',
       rows: [
-        ['FIELD', 'Write a message'],
-        ['DOCUMENT', 'Messaging — LinkedIn'],
-        ['NEARBY', "Rina Solá's message"],
+        ['App', 'Chrome'],
+        ['Placeholder', 'Write a message…'],
+        ['Title', 'Messaging — LinkedIn'],
+        [
+          'Text above',
+          'Rina Solá: We’re hiring a staff engineer for our platform team and I think you’d fit it well. Any interest in a short call this week?',
+        ],
       ],
     },
   },

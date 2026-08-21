@@ -13,6 +13,7 @@ public struct SettingsRepository: Sendable {
         static let authentication = "llm.authentication"
         static let customHeaderName = "llm.customHeaderName"
         static let thinkingMode = "llm.thinkingMode"
+        static let contextEnrichmentEnabled = "context.enrichmentEnabled"
         static let spellingLanguageMode = "spelling.languageMode"
         static let fixedSpellingLanguage = "spelling.fixedLanguage"
     }
@@ -73,6 +74,18 @@ public struct SettingsRepository: Sendable {
             defaults.set(newValue.thinkingMode.rawValue, forKey: Key.thinkingMode)
             defaults.removeObject(forKey: "llm.sendsTemperature")
             defaults.removeObject(forKey: "llm.temperature")
+        }
+    }
+
+    /// Whether requests are given the interface around the field by default.
+    ///
+    /// Off unless asked for: reading the surroundings happens on this machine either
+    /// way, but sending them is a decision, so nothing travels until it is made. The
+    /// panel's own switch overrides this for a single application.
+    public var isContextEnrichmentEnabled: Bool {
+        get { makeDefaults().bool(forKey: Key.contextEnrichmentEnabled) }
+        nonmutating set {
+            makeDefaults().set(newValue, forKey: Key.contextEnrichmentEnabled)
         }
     }
 

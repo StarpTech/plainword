@@ -3,79 +3,65 @@
 /* ---------------------------------------------------------------------------
    Plainword Ink — the app's design system, on the web.
 
-   Raw tokens live on :root and get swapped wholesale in dark mode; the @theme
-   block below only maps them onto Tailwind utility names. Components should
-   never invent a one-off colour, radius or shadow.
+   Raw tokens live on :root and carry both themes at once; the @theme block
+   below only maps them onto Tailwind utility names. Components should never
+   invent a one-off colour, radius or shadow.
    --------------------------------------------------------------------------- */
 
-/* Light — "paper" ------------------------------------------------------- */
+/* Palette ---------------------------------------------------------------
+   One list, both themes: light-dark() picks a side from the used
+   color-scheme, so the toggle in the footer only has to change that one
+   property on <html>. With no explicit choice, `light dark` means the
+   system decides — and native controls (selects, scrollbars) follow along.
+   ------------------------------------------------------------------------ */
 :root {
-  --pw-canvas: #efe9dd;
-  --pw-surface: #fbf8f1;
-  --pw-raised: #f4efe4;
-  --pw-field: #f1ebde;
+  color-scheme: light dark;
 
-  --pw-ink: #26211a;
-  --pw-ink-soft: #6f6759;
-  --pw-ink-faint: #9c937f;
+  /* Paper / lamplight ---------------------------------------------------- */
+  --pw-canvas: light-dark(#efe9dd, #191612);
+  --pw-surface: light-dark(#fbf8f1, #242019);
+  --pw-raised: light-dark(#f4efe4, #2b261e);
+  --pw-field: light-dark(#f1ebde, #1e1a14);
 
-  --pw-line: #e3dccb;
-  --pw-line-strong: #d2c9b4;
+  --pw-ink: light-dark(#26211a, #efe8da);
+  --pw-ink-soft: light-dark(#6f6759, #a79d8a);
+  --pw-ink-faint: light-dark(#9c937f, #7e7562);
 
-  --pw-accent: #33684c;
-  --pw-accent-strong: #27543d;
-  --pw-accent-muted: #e3ebe0;
-  --pw-accent-ink: #f7f4ea;
+  --pw-line: light-dark(#e3dccb, #383227);
+  --pw-line-strong: light-dark(#d2c9b4, #463e30);
 
-  --pw-danger: #a6453e;
-  --pw-danger-muted: #f5e3de;
-  --pw-warning: #96690f;
-  --pw-selection: #e8e2d2;
+  --pw-accent: light-dark(#33684c, #8cbd9b);
+  --pw-accent-strong: light-dark(#27543d, #a5cfb2);
+  --pw-accent-muted: light-dark(#e3ebe0, #2c3a2f);
+  --pw-accent-ink: light-dark(#f7f4ea, #161b15);
 
-  --pw-shadow: 0 18px 44px rgb(72 56 28 / 0.16), 0 3px 8px rgb(72 56 28 / 0.08);
-  --pw-shadow-soft: 0 1px 2px rgb(72 56 28 / 0.05), 0 6px 18px rgb(72 56 28 / 0.06);
-  --pw-shadow-lift: 0 2px 5px rgb(72 56 28 / 0.06), 0 20px 40px rgb(72 56 28 / 0.13);
-  --pw-shadow-hairline: 0 1px 0 rgb(72 56 28 / 0.06);
+  --pw-danger: light-dark(#a6453e, #d08b80);
+  --pw-danger-muted: light-dark(#f5e3de, #3c2823);
+  --pw-warning: light-dark(#96690f, #d9a84e);
+  --pw-selection: light-dark(#e8e2d2, #332d23);
 
-  /* The menu bar strip in the demo is always a dark macOS bar. */
-  --pw-menubar: #1e1b16;
-  --pw-menubar-ink: #d8d2c6;
-  --pw-menubar-stop: #8cbd9b;
+  /* Ink-brown shadows on paper; plain black in the dark. */
+  --pw-shadow:
+    0 18px 44px light-dark(rgb(72 56 28 / 0.16), rgb(0 0 0 / 0.5)),
+    0 3px 8px light-dark(rgb(72 56 28 / 0.08), rgb(0 0 0 / 0.3));
+  --pw-shadow-soft:
+    0 1px 2px light-dark(rgb(72 56 28 / 0.05), rgb(0 0 0 / 0.3)),
+    0 6px 18px light-dark(rgb(72 56 28 / 0.06), rgb(0 0 0 / 0.28));
+  --pw-shadow-lift:
+    0 2px 5px light-dark(rgb(72 56 28 / 0.06), rgb(0 0 0 / 0.35)),
+    0 20px 40px light-dark(rgb(72 56 28 / 0.13), rgb(0 0 0 / 0.45));
+  --pw-shadow-hairline: 0 1px 0 light-dark(rgb(72 56 28 / 0.06), rgb(0 0 0 / 0.35));
+
+  /* The menu bar strip in the demo follows the theme, the way macOS's own
+     bar does: pale with dark ink on paper, near-black in the dark. */
+  --pw-menubar: light-dark(#e4ddcd, #0f0d0a);
+  --pw-menubar-ink: light-dark(#3a3429, #d8d2c6);
+  --pw-menubar-stop: light-dark(#33684c, #8cbd9b);
 }
 
-/* Dark — "lamplight" ---------------------------------------------------- */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --pw-canvas: #191612;
-    --pw-surface: #242019;
-    --pw-raised: #2b261e;
-    --pw-field: #1e1a14;
-
-    --pw-ink: #efe8da;
-    --pw-ink-soft: #a79d8a;
-    --pw-ink-faint: #7e7562;
-
-    --pw-line: #383227;
-    --pw-line-strong: #463e30;
-
-    --pw-accent: #8cbd9b;
-    --pw-accent-strong: #a5cfb2;
-    --pw-accent-muted: #2c3a2f;
-    --pw-accent-ink: #161b15;
-
-    --pw-danger: #d08b80;
-    --pw-danger-muted: #3c2823;
-    --pw-warning: #d9a84e;
-    --pw-selection: #332d23;
-
-    --pw-shadow: 0 18px 44px rgb(0 0 0 / 0.5), 0 3px 8px rgb(0 0 0 / 0.3);
-    --pw-shadow-soft: 0 1px 2px rgb(0 0 0 / 0.3), 0 6px 18px rgb(0 0 0 / 0.28);
-    --pw-shadow-lift: 0 2px 5px rgb(0 0 0 / 0.35), 0 20px 40px rgb(0 0 0 / 0.45);
-    --pw-shadow-hairline: 0 1px 0 rgb(0 0 0 / 0.35);
-
-    --pw-menubar: #0f0d0a;
-  }
-}
+/* What the footer toggle writes. Absent, the system preference stands. */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 @theme inline {
   /* Surfaces ------------------------------------------------------------- */
@@ -251,6 +237,35 @@
   .reveal[data-visible="true"] {
     opacity: 1;
     transform: none;
+  }
+
+  /* Sun to moon: the disc shrinks a little, a mask circle slides in to cut a
+     crescent, and the rays fold into the centre. One 180ms clock, like
+     everything else. */
+  .pw-theme-toggle .pw-theme-disc,
+  .pw-theme-toggle .pw-theme-bite,
+  .pw-theme-toggle .pw-theme-rays line {
+    transition:
+      cx 320ms var(--ease-soft),
+      cy 320ms var(--ease-soft),
+      r 320ms var(--ease-soft),
+      opacity 200ms ease-out,
+      transform 320ms var(--ease-soft);
+    transform-origin: 12px 12px;
+  }
+
+  .pw-theme-toggle[data-mode="dark"] .pw-theme-disc {
+    r: 8;
+  }
+
+  .pw-theme-toggle[data-mode="dark"] .pw-theme-bite {
+    cx: 18;
+    cy: 6;
+  }
+
+  .pw-theme-toggle[data-mode="dark"] .pw-theme-rays line {
+    opacity: 0;
+    transform: scale(0.35);
   }
 
   /* Mono section labels — the app's "machinery voice". */

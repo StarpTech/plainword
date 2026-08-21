@@ -7,7 +7,7 @@ const FEATURES = [
   {
     glyph: '✎\uFE0E',
     title: 'Writes in your tone and style',
-    text: 'Set a tone, a style and standing instructions once. Every suggestion obeys them.',
+    text: 'Keep your own voice, or ask for friendly or professional. Standing instructions ride along with every request.',
   },
   {
     glyph: '❝\uFE0E',
@@ -15,9 +15,24 @@ const FEATURES = [
     text: 'A reply in a thread gets edited as a reply, not as an isolated sentence.',
   },
   {
+    glyph: '⌘\uFE0E',
+    title: 'Answers to two shortcuts',
+    text: '⌘F2 reviews what you wrote. ⇧⌘F2 takes an instruction — shorter, friendlier, in German. Rebind either one.',
+  },
+  {
+    glyph: '⌕\uFE0E',
+    title: 'Shows what it read',
+    text: 'Every suggestion carries a receipt of the surrounding text it used — and a switch to leave that context out.',
+  },
+  {
+    glyph: '⊘\uFE0E',
+    title: 'Stays quiet where you tell it to',
+    text: 'Pause suggestions from the menu bar, or ignore an app for good. Password fields are never read.',
+  },
+  {
     glyph: '⌁\uFE0E',
     title: 'Runs on any LLM',
-    text: 'Ollama on your Mac, your Codex subscription, or any OpenAI-compatible key.',
+    text: 'Ollama on your Mac, your Codex login, or any OpenAI-compatible key — with reasoning effort you set yourself.',
   },
 ];
 
@@ -41,6 +56,39 @@ function FeatureCard({ glyph, title, text, delay }) {
   );
 }
 
+/**
+ * The active application's icon, as the menu draws it beside "Ignore <App>".
+ * Mail stands in for whatever you happen to be writing in.
+ */
+function MailIcon() {
+  return (
+    <svg viewBox="0 0 16 16" className="h-4 w-4 shrink-0" aria-hidden="true">
+      <defs>
+        <linearGradient id="pw-mail-face" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#5ec2fb" />
+          <stop offset="1" stopColor="#1a7ff0" />
+        </linearGradient>
+      </defs>
+      <rect x="0.5" y="0.5" width="15" height="15" rx="3.6" fill="url(#pw-mail-face)" />
+      <path
+        d="M3.4 5.2h9.2v5.6H3.4z"
+        fill="none"
+        stroke="#fff"
+        strokeWidth="1.1"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M3.7 5.6 8 8.7l4.3-3.1"
+        fill="none"
+        stroke="#fff"
+        strokeWidth="1.1"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /** The menu bar item and its menu, drawn to the same spec as the app's. */
 function MenuBarCard() {
   return (
@@ -49,8 +97,9 @@ function MenuBarCard() {
         <p className="pw-label mb-3">In the menu bar</p>
         <h3 className="text-h3">A lowercase p and a green full stop.</h3>
         <p className="mt-3 max-w-[420px] text-sm text-pretty text-ink-soft">
-          No dock icon, no window in the way — just a stop that turns amber while a request is
-          running, and disappears while suggestions are paused.
+          No window in the way — just a stop that turns amber while a request is running, and
+          disappears while suggestions are paused. Turn off <em>Show in Dock</em> and the menu
+          bar is all that is left of it.
         </p>
         <div className="mt-5 flex flex-wrap items-center gap-4">
           <span className="font-serif text-[22px]">
@@ -80,7 +129,12 @@ function MenuBarCard() {
               <span className="h-3.5 w-3.5 rounded-full bg-surface" />
             </span>
           </div>
-          <div className="rounded-md px-2.5 py-[7px] text-ink-soft">Ignore Mail</div>
+          {/* The row names one app, so it carries that app's own icon — 16px beside
+              the title, exactly as the app draws it. */}
+          <div className="flex items-center gap-2 rounded-md px-2.5 py-[7px] text-ink-soft">
+            <MailIcon />
+            <span>Ignore Mail</span>
+          </div>
           <div className="mx-1.5 my-1 h-px bg-line-strong" />
           {MENU_ITEMS.map((item) => (
             <div key={item.label} className="flex items-center justify-between rounded-md px-2.5 py-[7px]">

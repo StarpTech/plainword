@@ -39,6 +39,26 @@ struct FocusedTextSnapshot {
     }
 }
 
+/// A writable field seen while a fixture recording was armed.
+///
+/// A recording used to fire on a countdown, against whatever happened to be focused when
+/// it expired. Arming remembers the field instead, while the author is still in the
+/// application they are writing in — because by the time they come back to Plainword to
+/// stop the recording, focus is in the settings window, and a countdown that fired then
+/// would faithfully record that.
+struct FixtureRecordingTarget {
+    let element: AXUIElement
+    let processIdentifier: pid_t
+    let applicationName: String
+    let bundleIdentifier: String?
+    let role: String
+
+    /// What the author is told is about to be recorded.
+    var summary: String {
+        applicationName + " — " + role
+    }
+}
+
 enum AccessibilitySnapshotState: Equatable {
     case unchanged
     case changed
@@ -370,21 +390,82 @@ final class AccessibilityTextClient {
         await contextService.invalidate(processIdentifier: processIdentifier)
     }
 
-    /// Records the tree behind whatever is focused right now, for replaying offline.
+    /// What is focused, in the words the Accessibility API used, whether or not it is
+    /// somewhere Plainword can work.
+    ///
+    /// Only for explaining a refusal. "Nothing writable was focused" is true of a great
+    /// many different situations — a canvas, a read-only field, a password box, an
+    /// application that publishes no tree at all — and while recording a corpus the
+    /// difference between them is the whole finding.
+    func focusedElementDescription() -> String {
+        guard isTrusted else { return "Accessibility access is off." }
+        let systemWideElement = AXUIElementCreateSystemWide()
+        guard let element = elementAttribute(
+            kAXFocusedUIElementAttribute,
+            from: systemWideElement
+        ) else {
+            return "no focused element at all"
+        }
+
+        var processIdentifier: pid_t = 0
+        _ = AXUIElementGetPid(element, &processIdentifier)
+        let application = NSRunningApplication(processIdentifier: processIdentifier)
+        let role = stringAttribute(kAXRoleAttribute as String, from: element) ?? "no role"
+        let subrole = stringAttribute(kAXSubroleAttribute as String, from: element)
+        let editable = elementAttribute(kAXEditableAncestorAttribute, from: element) != nil
+
+        var reasons: [String] = []
+        if !isSupportedTextElement(element) { reasons.append("not a text role") }
+        if isProtected(element) { reasons.append("protected") }
+        if isInsideToolbar(element) { reasons.append("in a toolbar") }
+        if !isWritableTextElement(element) { reasons.append("value not settable") }
+        if hasMultipleSelections(element) { reasons.append("multiple selections") }
+
+        return "\(application?.localizedName ?? "unknown app") published "
+            + "\(role)\(subrole.map { "/\($0)" } ?? "")"
+            + (editable ? " with an editable ancestor" : " with no editable ancestor")
+            + (reasons.isEmpty ? "" : " — \(reasons.joined(separator: ", "))")
+    }
+
+    /// The writable field focus is in right now, remembered for a recording that will be
+    /// taken later.
+    func focusedRecordingTarget() -> FixtureRecordingTarget? {
+        guard let focused = focusedEditableElement() else { return nil }
+        let application = NSRunningApplication(processIdentifier: focused.processIdentifier)
+        return FixtureRecordingTarget(
+            element: focused.element,
+            processIdentifier: focused.processIdentifier,
+            applicationName: application?.localizedName ?? "Another app",
+            bundleIdentifier: application?.bundleIdentifier,
+            role: stringAttribute(kAXRoleAttribute, from: focused.element) ?? "unknown role"
+        )
+    }
+
+    /// Records the tree behind a remembered field, for replaying offline.
     ///
     /// The pipeline is run for real against the live application while a recorder watches
     /// it, so the fixture answers exactly the questions the sources ask — including the
     /// marker reads, whose parameters could not be enumerated any other way.
-    func recordFocusedTree(scenario: String) -> AXFixtureCapture.Result? {
-        guard isTrusted, let focused = focusedEditableElement() else { return nil }
-        let application = NSRunningApplication(processIdentifier: focused.processIdentifier)
-        let snapshot = captureFocusedText(scope: .sentence)
-            ?? captureFocusedInsertionPoint()
-        return AXFixtureCapture.recordFocusedTree(
-            element: focused.element,
-            applicationName: application?.localizedName ?? "Another app",
-            bundleIdentifier: application?.bundleIdentifier,
-            targetKind: snapshot?.context.targetKind ?? .insertionPoint,
+    func recordTree(
+        for target: FixtureRecordingTarget,
+        scenario: String
+    ) -> AXFixtureCapture.Result? {
+        guard isTrusted else { return nil }
+        // Read from the remembered element rather than from focus, which by now is in
+        // Plainword's own window.
+        let capturedText = captureTextState(from: target.element, scope: .document)?.text
+            ?? stringAttribute(kAXValueAttribute, from: target.element)
+            ?? ""
+        return AXFixtureCapture.recordTree(
+            element: target.element,
+            applicationName: target.applicationName,
+            bundleIdentifier: target.bundleIdentifier,
+            // Recorded as the prefetch would ask, not as this moment happens to be. A
+            // draft at an empty caret is the most demanding request the pipeline serves,
+            // so a recording taken for it measures the case that fails first — and one
+            // taken for anything lesser would call a thin harvest sufficient.
+            targetKind: .insertionPoint,
+            capturedText: capturedText,
             scenario: scenario,
             primaryScreenMaxY: primaryScreenMaxY
         )

@@ -67,6 +67,10 @@ final class CrossAppCorrectionController: ObservableObject {
     @Published private(set) var activity: ActivityState = .permissionRequired
     @Published private(set) var activeApplication: ActiveApplication?
     @Published private(set) var excludedApplications: [ExcludedApplication]
+    /// Whether a fixture recording is armed, waiting for the author to stop it.
+    @Published private(set) var isRecordingFixture = false
+    /// The field a recording stopped now would capture, or nothing seen yet.
+    @Published private(set) var recordingTargetSummary: String?
 
     private let settings: SettingsStore
     private let defaults: UserDefaults
@@ -79,15 +83,22 @@ final class CrossAppCorrectionController: ObservableObject {
         category: "Correction"
     )
     private var excludedApplicationIdentifiers: Set<String>
-    /// Applications the author has switched interface reading on for. Sending is off
-    /// until asked for, so absence from this set is the default.
+    /// Applications the author has switched interface reading on for, against a
+    /// default that says otherwise. Settings decides what happens everywhere else.
     private var contextEnabledApplicationIdentifiers: Set<String>
+    /// Applications the author has switched interface reading off for, against a
+    /// default that says otherwise.
+    private var contextDisabledApplicationIdentifiers: Set<String>
     /// What the surrounding interface offered for the suggestion on screen, whether or
     /// not it was sent. Finding happens on this machine; sending is the separate,
     /// switched decision below.
     private var pendingAvailableContext: TextEditContext?
     /// Whether the suggestion on screen was actually given that context.
     private var pendingRequestSentContext = false
+    /// The last writable field focus landed in while recording was armed.
+    private var armedRecordingTarget: FixtureRecordingTarget?
+    /// Watches focus while recording is armed. Nothing polls when it is not.
+    private var recordingWatchTask: Task<Void, Never>?
     private var applicationActivationObserver: NSObjectProtocol?
     private var activeApplicationProcessIdentifier: pid_t?
     private var activeApplicationActivationScreenFrame: CGRect?
@@ -143,7 +154,10 @@ final class CrossAppCorrectionController: ObservableObject {
     }
     private var pendingCorrectionText: String?
     private var pendingSuggestion: WritingSuggestion?
-    private var suggestionHistory: [WritingSuggestion] = []
+    /// The request the suggestion on screen came out of, kept so the panel can ask it
+    /// again when the author changes what it should be sent.
+    private var pendingSuggestionOrigin: SuggestionOrigin?
+    private var suggestionHistory: [SuggestionHistoryEntry] = []
     private var preparedManualSnapshot: FocusedTextSnapshot?
     private var preparedManualSnapshotDate: Date?
     private var pendingPanelAnchor: CGRect?
@@ -165,6 +179,7 @@ final class CrossAppCorrectionController: ObservableObject {
     /// A second review press replaces it rather than waiting for it, so this marks the
     /// request to cancel and the panel to reuse when that happens.
     private var runningReviewGeneration: Int?
+    private var settingsObserver: AnyCancellable?
 
     init(settings: SettingsStore, defaults: UserDefaults = .standard) {
         self.settings = settings
@@ -176,7 +191,40 @@ final class CrossAppCorrectionController: ObservableObject {
         contextEnabledApplicationIdentifiers = Set(
             defaults.stringArray(forKey: "contextEnabledApplications") ?? []
         )
+        contextDisabledApplicationIdentifiers = Set(
+            defaults.stringArray(forKey: "contextDisabledApplications") ?? []
+        )
         isListeningEnabled = defaults.object(forKey: "assistantListeningEnabled") as? Bool ?? true
+        observeContextEnrichmentSetting()
+    }
+
+    /// Follows the setting so that changing it takes hold everywhere at once.
+    ///
+    /// The per-application switches are decisions made against a default, so a new
+    /// default replaces them rather than being outvoted by whichever applications the
+    /// author happened to visit under the old one.
+    private func observeContextEnrichmentSetting() {
+        settingsObserver = settings.$isContextEnrichmentEnabled
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                self?.applyContextEnrichmentDefault()
+            }
+    }
+
+    private func applyContextEnrichmentDefault() {
+        contextEnabledApplicationIdentifiers.removeAll()
+        contextDisabledApplicationIdentifiers.removeAll()
+        persistContextSendingDecisions()
+        // Entries made under the previous default carry it in their key, so dropping
+        // them keeps a suggestion shaped by the interface from reappearing after the
+        // author has asked for that to stop — and the reverse.
+        suggestionCache = CorrectionSuggestionCache()
+        proposalPanel.updateContextSendingEnabled(
+            isContextSendingEnabled(
+                forApplicationIdentifier: pendingSnapshot?.applicationIdentifier
+            )
+        )
     }
 
     var isReady: Bool {
@@ -393,6 +441,7 @@ final class CrossAppCorrectionController: ObservableObject {
         pendingAvailableContext = nil
         pendingRequestSentContext = false
         suggestionHistory.removeAll()
+        pendingSuggestionOrigin = nil
         pendingPanelAnchor = nil
         isPanelAnchorPinned = false
         proposalRevalidationTask?.cancel()
@@ -440,6 +489,33 @@ final class CrossAppCorrectionController: ObservableObject {
         updateIdleActivity()
     }
 
+    /// What produced the suggestion on screen, in enough detail to ask for it again.
+    ///
+    /// The switch in the panel decides what a request is sent, and turning it changes
+    /// nothing about a suggestion already made. Keeping the request means the author
+    /// can act on that decision from the panel instead of closing it and starting the
+    /// same request over from the field.
+    private enum SuggestionOrigin {
+        case review(snapshot: FocusedTextSnapshot)
+        case composition(instruction: String, snapshot: FocusedTextSnapshot)
+        case customEdit(
+            instruction: String,
+            snapshot: FocusedTextSnapshot,
+            editContext: TextEditContext,
+            previousSuggestion: WritingSuggestion?
+        )
+    }
+
+    /// A suggestion the Back button can return to, with what it took to make it.
+    ///
+    /// The receipt speaks for whichever suggestion is on screen, so going back has to
+    /// restore what that one was sent along with the suggestion itself.
+    private struct SuggestionHistoryEntry {
+        let suggestion: WritingSuggestion
+        let origin: SuggestionOrigin?
+        let sentContext: Bool
+    }
+
     private func requestCorrection(
         for capturedSnapshot: FocusedTextSnapshot,
         generation: Int,
@@ -468,6 +544,9 @@ final class CrossAppCorrectionController: ObservableObject {
         pendingRequestSentContext = isContextSendingEnabled(
             forApplicationIdentifier: snapshot.applicationIdentifier
         )
+        // Recorded before the cache is consulted: a suggestion that came back without a
+        // request is still one the panel can offer to ask for again.
+        pendingSuggestionOrigin = .review(snapshot: capturedSnapshot)
 
         let promptLocaleIdentifier = promptLanguageIdentifier(for: snapshot.context)
         let intent = EditIntent.correct
@@ -678,6 +757,7 @@ final class CrossAppCorrectionController: ObservableObject {
         pendingAvailableContext = nil
         pendingRequestSentContext = false
         suggestionHistory.removeAll()
+        pendingSuggestionOrigin = nil
         isProposalVisible = true
         isProposalSuspended = false
         isCustomPromptVisible = true
@@ -780,6 +860,10 @@ final class CrossAppCorrectionController: ObservableObject {
         pendingRequestSentContext = isContextSendingEnabled(
             forApplicationIdentifier: snapshot.applicationIdentifier
         )
+        pendingSuggestionOrigin = .composition(
+            instruction: instruction,
+            snapshot: snapshot
+        )
 
         do {
             var correctionResponse: CorrectionResponse?
@@ -863,6 +947,7 @@ final class CrossAppCorrectionController: ObservableObject {
         pendingCorrectionText = nil
         pendingSuggestion = nil
         suggestionHistory.removeAll()
+        pendingSuggestionOrigin = nil
         isProposalVisible = true
         isProposalSuspended = false
         isCustomPromptVisible = false
@@ -930,6 +1015,7 @@ final class CrossAppCorrectionController: ObservableObject {
         pendingAvailableContext = nil
         pendingRequestSentContext = false
         suggestionHistory.removeAll()
+        pendingSuggestionOrigin = nil
 
         guard let snapshot = captureSnapshotForExplicitReview(),
               snapshot.context.text
@@ -1038,8 +1124,18 @@ final class CrossAppCorrectionController: ObservableObject {
         guard isCurrentCorrection(generation) else { return }
         let editContext = contextualized.sent
         pendingAvailableContext = contextualized.available
+        // What the suggestion this one replaces was made from, so the Back button can
+        // hand it back intact.
+        let replacedOrigin = pendingSuggestionOrigin
+        let replacedSentContext = pendingRequestSentContext
         pendingRequestSentContext = isContextSendingEnabled(
             forApplicationIdentifier: snapshot.applicationIdentifier
+        )
+        pendingSuggestionOrigin = .customEdit(
+            instruction: instruction,
+            snapshot: snapshot,
+            editContext: capturedEditContext,
+            previousSuggestion: previousSuggestion
         )
         let locale = promptLanguageIdentifier(for: editContext)
         // Transforming a draft leaves it a draft: the field is still empty, so the
@@ -1101,7 +1197,11 @@ final class CrossAppCorrectionController: ObservableObject {
                 return
             }
             if let previousSuggestion {
-                suggestionHistory.append(previousSuggestion)
+                suggestionHistory.append(SuggestionHistoryEntry(
+                    suggestion: previousSuggestion,
+                    origin: replacedOrigin,
+                    sentContext: replacedSentContext
+                ))
             }
             present(suggestion, for: snapshot, compact: false)
         } catch is CancellationError {
@@ -1174,6 +1274,36 @@ final class CrossAppCorrectionController: ObservableObject {
         }
     }
 
+    /// Runs the request behind the suggestion on screen again, as it now stands.
+    ///
+    /// The switch decides what a request is sent, and a suggestion already made cannot
+    /// take on that decision. This asks the same question again under the setting the
+    /// author has just chosen, in the panel they are already looking at.
+    private func rerunPendingSuggestion() {
+        guard let origin = pendingSuggestionOrigin else { return }
+        switch origin {
+        case .review(let snapshot):
+            // The review's marker was already opened to get here, so the answer comes
+            // back into the panel that is open rather than back behind a marker.
+            retryCorrection(for: snapshot, compactPresentation: false)
+        case .composition(let instruction, let snapshot):
+            retryComposition(instruction, for: snapshot)
+        case .customEdit(let instruction, let snapshot, let editContext, let previous):
+            // This request already put its predecessor in the history on its first run.
+            // Asking again replaces its own result, not the one before it, so that
+            // entry is taken back rather than recorded twice.
+            if let previous, suggestionHistory.last?.suggestion == previous {
+                suggestionHistory.removeLast()
+            }
+            retryCustomEdit(
+                instruction,
+                for: snapshot,
+                editing: editContext,
+                previousSuggestion: previous
+            )
+        }
+    }
+
     private func beginRetry(for snapshot: FocusedTextSnapshot) -> Int {
         correctionGeneration &+= 1
         activity = .correcting(snapshot.applicationName)
@@ -1188,9 +1318,17 @@ final class CrossAppCorrectionController: ObservableObject {
         return correctionGeneration
     }
 
+    /// Whether the next request in this application should be given the interface
+    /// around the field.
+    ///
+    /// Settings holds the answer for everywhere; the panel's switch holds it for the
+    /// applications it has been used in, and those win. Without an application to
+    /// scope the decision to there is nothing to make it about, so nothing is sent.
     func isContextSendingEnabled(forApplicationIdentifier identifier: String?) -> Bool {
         guard let identifier else { return false }
-        return contextEnabledApplicationIdentifiers.contains(identifier)
+        if contextEnabledApplicationIdentifiers.contains(identifier) { return true }
+        if contextDisabledApplicationIdentifiers.contains(identifier) { return false }
+        return settings.isContextEnrichmentEnabled
     }
 
     /// Records whether the next suggestion in this application should be sent the
@@ -1204,18 +1342,36 @@ final class CrossAppCorrectionController: ObservableObject {
         forApplicationIdentifier identifier: String?
     ) {
         guard let identifier else { return }
-        if isEnabled {
-            contextEnabledApplicationIdentifiers.insert(identifier)
-        } else {
+        // Only a decision that differs from the setting is worth keeping: agreeing
+        // with the default is the same as not having decided, and storing it would
+        // otherwise pin this application against a later change to that default.
+        if isEnabled == settings.isContextEnrichmentEnabled {
             contextEnabledApplicationIdentifiers.remove(identifier)
+            contextDisabledApplicationIdentifiers.remove(identifier)
+        } else if isEnabled {
+            contextEnabledApplicationIdentifiers.insert(identifier)
+            contextDisabledApplicationIdentifiers.remove(identifier)
+        } else {
+            contextDisabledApplicationIdentifiers.insert(identifier)
+            contextEnabledApplicationIdentifiers.remove(identifier)
+        }
+        if !isEnabled {
             // Entries made while sending was on carry that context in their key, but
             // dropping them keeps a suggestion that was shaped by the interface from
             // reappearing once the author has asked for that to stop.
             suggestionCache = CorrectionSuggestionCache()
         }
+        persistContextSendingDecisions()
+    }
+
+    private func persistContextSendingDecisions() {
         defaults.set(
             Array(contextEnabledApplicationIdentifiers).sorted(),
             forKey: "contextEnabledApplications"
+        )
+        defaults.set(
+            Array(contextDisabledApplicationIdentifiers).sorted(),
+            forKey: "contextDisabledApplications"
         )
     }
 
@@ -1402,7 +1558,12 @@ final class CrossAppCorrectionController: ObservableObject {
                     isEnabled,
                     forApplicationIdentifier: snapshot.applicationIdentifier
                 )
-            }
+            },
+            // Offered only when the request behind this suggestion is still known, so
+            // the panel never shows an action it cannot carry out.
+            onRerunUnderCurrentContext: pendingSuggestionOrigin == nil
+                ? nil
+                : { [weak self] in self?.rerunPendingSuggestion() }
         )
         if isProposalSuspended {
             proposalPanel.suspendVisibility()
@@ -1425,12 +1586,17 @@ final class CrossAppCorrectionController: ObservableObject {
 
     private func restorePreviousSuggestion() {
         guard let snapshot = pendingSnapshot,
-              let suggestion = suggestionHistory.popLast(),
+              let entry = suggestionHistory.popLast(),
               accessibility.snapshotState(snapshot) == .unchanged else {
             dismissProposal()
             return
         }
-        present(suggestion, for: snapshot, compact: false)
+        // The receipt speaks for whatever is on screen, so the restored suggestion
+        // brings back both the request behind it and whether that request was sent
+        // the surrounding interface.
+        pendingSuggestionOrigin = entry.origin
+        pendingRequestSentContext = entry.sentContext
+        present(entry.suggestion, for: snapshot, compact: false)
     }
 
     private func startSourceOverlayTracking(
@@ -1925,6 +2091,7 @@ final class CrossAppCorrectionController: ObservableObject {
             pendingCorrectionText = nil
             pendingSuggestion = nil
             suggestionHistory.removeAll()
+            pendingSuggestionOrigin = nil
             // The panel is replaced by a receipt rather than simply vanishing, so the
             // edit that just landed is confirmed where the author was already looking.
             dismissProposalUI(showingApplied: true)
@@ -1956,6 +2123,7 @@ final class CrossAppCorrectionController: ObservableObject {
         pendingAvailableContext = nil
         pendingRequestSentContext = false
         suggestionHistory.removeAll()
+        pendingSuggestionOrigin = nil
         pendingPanelAnchor = nil
         isPanelAnchorPinned = false
         proposalRevalidationTask?.cancel()
@@ -2038,36 +2206,103 @@ final class CrossAppCorrectionController: ObservableObject {
         updateIdleActivity()
     }
 
-    /// Records the focused application's accessibility tree and offers it for saving.
+    /// Arms a fixture recording, and reports what the author should do next.
     ///
     /// Recording is how a heuristic here stops being an argument and becomes a
     /// measurement: replayed offline, a captured tree exercises the real sources and the
     /// real ranking against what an application genuinely publishes.
-    func recordAccessibilityFixture(scenario: String) -> String {
+    ///
+    /// Nothing is captured while armed. Focus is watched, and the last writable field it
+    /// landed in is remembered, so that stopping the recording — which necessarily
+    /// happens back in Plainword's own window — still records the field the author meant.
+    @discardableResult
+    func startAccessibilityFixtureRecording() -> String {
         guard isAccessibilityTrusted else {
             return "Accessibility access is required to record a tree."
         }
-        guard let result = accessibility.recordFocusedTree(scenario: scenario) else {
-            return "Nothing writable was focused when the recording was taken."
+        guard !isRecordingFixture else { return "Already recording." }
+
+        armedRecordingTarget = nil
+        recordingTargetSummary = nil
+        isRecordingFixture = true
+        fixtureLogger.info("recording armed")
+
+        recordingWatchTask?.cancel()
+        recordingWatchTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled, self?.isRecordingFixture == true {
+                self?.noteFocusedRecordingTarget()
+                // Often enough to catch a field the author only passes through, rarely
+                // enough that arming costs the machine nothing worth measuring.
+                try? await Task.sleep(for: .milliseconds(400))
+            }
         }
-        let stem = result.fixture.application.replacingOccurrences(of: " ", with: "-")
-        let suffix = scenario.isEmpty ? "capture" : scenario
-        let suggestedName = (stem + "-" + suffix).lowercased() + ".json"
+        return "Recording armed. Click into the field you want captured, then stop."
+    }
+
+    /// Stops the recording, captures the remembered field, and writes it to disk.
+    func stopAccessibilityFixtureRecording() -> String {
+        recordingWatchTask?.cancel()
+        recordingWatchTask = nil
+        isRecordingFixture = false
+        recordingTargetSummary = nil
+
+        // One last look, for the case where the author never left Plainword: focus is
+        // here now, so this only ever adds a target, never replaces a better one.
+        noteFocusedRecordingTarget()
+
+        guard let target = armedRecordingTarget else {
+            armedRecordingTarget = nil
+            let reason = accessibility.focusedElementDescription()
+            fixtureLogger.info("recording found nothing: \(reason, privacy: .public)")
+            return "Nothing writable was focused while recording: " + reason
+        }
+        armedRecordingTarget = nil
+
+        let name = AXFixtureCapture.name(
+            application: target.applicationName,
+            recordedAt: Date()
+        )
+        fixtureLogger.info("recording \(name, privacy: .public)")
+
+        guard let result = accessibility.recordTree(for: target, scenario: name) else {
+            return "The recorded field could no longer be read."
+        }
+        fixtureLogger.info(
+            """
+            recorded \(result.fixture.nodes.count, privacy: .public) nodes from \
+            \(result.fixture.application, privacy: .public)
+            """
+        )
 
         do {
-            guard let url = try AXFixtureCapture.save(
-                result.fixture,
-                suggestedName: suggestedName
-            ) else {
-                return "Recording discarded."
-            }
+            let url = try AXFixtureCapture.write(result.fixture, named: name)
             let sources = result.telemetry.contributingSources.joined(separator: ", ")
-            let nodes = result.fixture.nodes.count
-            let reads = result.telemetry.roundTrips
-            return "Saved \(nodes) nodes to \(url.lastPathComponent) — \(reads) reads from [\(sources)]."
+            fixtureLogger.info("wrote \(url.path, privacy: .public)")
+            return """
+            Saved \(result.fixture.nodes.count) nodes to \(url.path) — \
+            \(result.telemetry.roundTrips) reads from [\(sources)]\
+            \(result.telemetry.isUnderfed ? ", UNDERFED" : "").
+            """
         } catch {
+            fixtureLogger.error("write failed: \(error.localizedDescription, privacy: .public)")
             return "Could not write the recording: \(error.localizedDescription)"
         }
+    }
+
+    /// Remembers the writable field focus is in, if it is in one.
+    private func noteFocusedRecordingTarget() {
+        guard let target = accessibility.focusedRecordingTarget() else { return }
+        armedRecordingTarget = target
+        if recordingTargetSummary != target.summary, isRecordingFixture {
+            recordingTargetSummary = target.summary
+        }
+    }
+
+    private var fixtureLogger: Logger {
+        Logger(
+            subsystem: Bundle.main.bundleIdentifier ?? "com.example.Plainword",
+            category: "AXFixtureCapture"
+        )
     }
 
     /// Reads the surroundings of the newly focused field, off the request path.

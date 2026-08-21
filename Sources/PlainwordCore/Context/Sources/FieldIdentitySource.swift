@@ -28,7 +28,12 @@ public struct FieldIdentitySource: ContextSource {
         let order = ReadOnlyContextGeometry.metadataReadingOrder
 
         func append(_ name: String, kind: ReadOnlyContextKind, relevance: Int) {
-            guard let text = values[name]?.stringValue else { return }
+            // An application that publishes the attribute but leaves it empty is saying
+            // nothing, and an empty fragment still costs a labelled block in the prompt.
+            guard let text = values[name]?.stringValue,
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return
+            }
             candidates.append(
                 .init(
                     kind: kind,
@@ -103,19 +108,26 @@ public struct DocumentIdentitySource: ContextSource {
 
     public func read(_ workspace: ContextWorkspace) -> [ReadOnlyContextCandidate] {
         var candidates: [ReadOnlyContextCandidate] = []
+        // Ranked by how many documents were passed on the way out rather than by how
+        // far the field sits from the window. A tab title answers "where is this text
+        // going" just as well whether the composer is two nodes inside the page or
+        // forty, and decaying it by node distance sank it below the relevance floor in
+        // exactly the interfaces — web and Electron composers — where it is often the
+        // only thing naming the destination at all.
+        var documentDepth = 0
         for level in workspace.ancestry() where isDocumentRole(level.facts.role) {
             guard !workspace.budget.isExhausted else { break }
             let values = workspace.attributes(
                 [AXName.title, AXName.url, AXName.document],
                 of: level.element
             )
-            let order = ReadOnlyContextGeometry.metadataReadingOrder + level.distance
+            let order = ReadOnlyContextGeometry.metadataReadingOrder + documentDepth
             if let title = values[AXName.title]?.stringValue {
                 candidates.append(
                     .init(
                         kind: .documentTitle,
                         text: title,
-                        relevance: 850 - level.distance * 20,
+                        relevance: 850 - documentDepth * 20,
                         readingOrder: order,
                         provenance: provenance(.stated)
                     )
@@ -128,12 +140,13 @@ public struct DocumentIdentitySource: ContextSource {
                     .init(
                         kind: .documentTitle,
                         text: readable,
-                        relevance: 840 - level.distance * 20,
+                        relevance: 840 - documentDepth * 20,
                         readingOrder: order,
                         provenance: provenance(.stated)
                     )
                 )
             }
+            documentDepth += 1
         }
         return candidates
     }

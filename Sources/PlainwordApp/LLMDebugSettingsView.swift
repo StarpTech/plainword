@@ -21,7 +21,6 @@ struct LLMDebugSettingsView: View {
 
     @State private var scope: Scope = .all
     @State private var inspectedCallID: UUID?
-    @State private var recordingCountdown: Int?
     @State private var recordingStatus: String?
 
     var body: some View {
@@ -35,8 +34,8 @@ struct LLMDebugSettingsView: View {
                 listHeader
                 privacyNotice
 
-                if let recordingStatus {
-                    Text(recordingStatus)
+                if let statusLine = recordingStatusLine {
+                    Text(statusLine)
                         .font(PlainwordFont.ui(11))
                         .foregroundStyle(PlainwordTheme.textSecondary)
                         .textSelection(.enabled)
@@ -86,6 +85,7 @@ struct LLMDebugSettingsView: View {
                     selection: $scope,
                     accessibilityLabel: "Filter calls"
                 )
+                .hoverTip("Show every call from this session, or only the ones that failed")
             }
 
             Spacer(minLength: 8)
@@ -102,40 +102,63 @@ struct LLMDebugSettingsView: View {
             }
             .buttonStyle(PlainwordButtonStyle(.quiet))
             .disabled(logStore.entries.isEmpty)
-            .help("Remove every recorded call from this session")
+            .hoverTip("Remove every recorded call from this session")
         }
     }
 
     /// Captures the accessibility tree of whatever the author is writing in, so the
     /// context pipeline can be replayed against it offline.
     ///
-    /// The countdown exists because pressing this moves focus here. Without it the
-    /// recording would faithfully capture this settings window.
+    /// Armed and stopped rather than counted down. Pressing this moves focus here, so a
+    /// timer would have to be raced; arming instead watches where focus goes, and stops
+    /// against the last field the author was actually writing in.
     private var recordTreeButton: some View {
-        Button(recordingCountdown.map { "Recording in \($0)…" } ?? "Record tree") {
-            startRecording()
+        Button(corrections.isRecordingFixture ? "Stop recording" : "Record tree") {
+            recordingStatus = corrections.isRecordingFixture
+                ? corrections.stopAccessibilityFixtureRecording()
+                : corrections.startAccessibilityFixtureRecording()
         }
-        .buttonStyle(PlainwordButtonStyle(.quiet))
-        .disabled(recordingCountdown != nil)
-        .help(
-            """
-            Switch to the app you are writing in. After five seconds Plainword records \
-            what that app exposes about the focused field and offers to save it.
-            """
-        )
+        .buttonStyle(PlainwordButtonStyle(corrections.isRecordingFixture ? .primary : .quiet))
+        .hoverTip(recordTreeHelp)
+        .accessibilityLabel(corrections.isRecordingFixture ? "Stop recording" : "Record tree")
+        .accessibilityHint(recordTreeHelp)
     }
 
-    private func startRecording() {
-        recordingStatus = nil
-        recordingCountdown = 5
-        Task { @MainActor in
-            while let remaining = recordingCountdown, remaining > 0 {
-                try? await Task.sleep(for: .seconds(1))
-                recordingCountdown = remaining - 1
-            }
-            recordingCountdown = nil
-            recordingStatus = corrections.recordAccessibilityFixture(scenario: "capture")
+    /// The hover hint on the record button — the one place the whole procedure is
+    /// spelled out.
+    ///
+    /// A control with two presses and a detour through another application cannot
+    /// explain itself in its own label, and the status line below only reports what has
+    /// already happened. The hint says what will happen, and it changes with the state,
+    /// because "press this next" is different advice from "press this first".
+    private var recordTreeHelp: String {
+        guard corrections.isRecordingFixture else {
+            return """
+            Records what an app publishes about the field you are writing in, so the \
+            context pipeline can be replayed against it offline.
+
+            Press this, switch to the other app and click into the field, then come \
+            back here and press Stop. The last field you clicked into is the one \
+            captured — coming back to this window does not lose it.
+
+            Saved as a JSON file in \(fixtureFolderLabel). Nothing is overwritten, and \
+            nothing leaves this machine.
+            """
         }
+        let target = corrections.recordingTargetSummary
+            .map { "Captures " + $0 + "." }
+            ?? "No writable field has been focused yet — click into one before stopping."
+        return """
+        \(target)
+
+        Stopping reads the field and everything around it, which takes a moment, then \
+        writes the recording to \(fixtureFolderLabel).
+        """
+    }
+
+    /// The fixture folder as the author would write it themselves.
+    private var fixtureFolderLabel: String {
+        (AXFixtureCapture.directory.path as NSString).abbreviatingWithTildeInPath
     }
 
     /// Deliberately a single quiet line: the reassurance matters, the detail does not
@@ -150,7 +173,7 @@ struct LLMDebugSettingsView: View {
                 .font(PlainwordFont.ui(11))
         }
         .foregroundStyle(PlainwordTheme.textSecondary)
-        .help(
+        .hoverTip(
             "The newest 100 calls are kept until Plainword quits or you clear them. "
                 + "API keys and authentication headers are never recorded. Endpoint "
                 + "query values are redacted. Prompts may contain your writing and "
@@ -186,6 +209,18 @@ struct LLMDebugSettingsView: View {
         .frame(minWidth: 320)
         .background(PlainwordTheme.surface)
         .foregroundStyle(PlainwordTheme.textPrimary)
+    }
+
+    /// What the recording is doing, or what it last did.
+    ///
+    /// While armed this says which field would be captured, because the whole risk of
+    /// this control is recording the wrong one and only finding out from the file.
+    private var recordingStatusLine: String? {
+        guard corrections.isRecordingFixture else { return recordingStatus }
+        guard let target = corrections.recordingTargetSummary else {
+            return "Recording armed — click into the field you want captured."
+        }
+        return "Recording armed — will capture " + target + "."
     }
 
     private var visibleEntries: [LLMDebugLogEntry] {
@@ -304,7 +339,7 @@ private struct LLMCallRow: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint("Opens the full request and response for this call")
-        .help("Open this call")
+        .hoverTip("Open this call")
     }
 
     private var accessibilityLabel: String {

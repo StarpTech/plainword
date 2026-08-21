@@ -7,9 +7,9 @@ export const GITHUB_URL = 'https://github.com/StarpTech/plainword';
 export const APP_CHIPS = ['macOS apps', 'Browser', 'WhatsApp', 'Slack', 'LinkedIn', 'and more'];
 
 export const VOICE_ROWS = [
-  { label: 'Tone', text: 'Neutral, warm or direct.' },
-  { label: 'Style', text: 'Concise, detailed or playful.' },
-  { label: 'Language', text: 'Whatever you wrote in.' },
+  { label: 'Tone', text: 'Keep mine, friendly or professional.' },
+  { label: 'Style', text: 'Keep mine, concise or detailed.' },
+  { label: 'Language', text: 'Whatever you wrote in \u2014 or pin one.' },
   { label: 'Instructions', text: '\u201CBritish English, no semicolons.\u201D' },
 ];
 

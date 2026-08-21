@@ -5,6 +5,16 @@ APP_PATH := $(DERIVED_DATA_PATH)/Build/Products/Debug/Plainword.app
 BUNDLE_ID := com.example.Plainword
 LOGIN_KEYCHAIN := $(HOME)/Library/Keychains/login.keychain-db
 
+# The settings sidebar shows CFBundleShortVersionString, which project.yml pins to a
+# placeholder. The release workflow overrides it from the pushed tag, so only local
+# builds are left claiming to be 1.0.0 forever. `git describe` answers with the latest
+# published release, plus how far this working tree has drifted past it.
+GIT_VERSION := $(shell git describe --tags --dirty=+dirty --match 'v[0-9]*' 2>/dev/null)
+MARKETING_VERSION ?= $(patsubst v%,%,$(GIT_VERSION))
+ifneq ($(strip $(MARKETING_VERSION)),)
+VERSION_ARGS = MARKETING_VERSION='$(MARKETING_VERSION)'
+endif
+
 # macOS records Accessibility approval and Keychain access against the app's code
 # signature, not its path or bundle id. An ad-hoc signature is a hash of the binary,
 # so it changes on every build and both approvals are silently revoked each time.
@@ -31,7 +41,7 @@ SIGNING_ARGS =
 SIGNING_DESCRIPTION := ad-hoc
 endif
 
-.PHONY: project test-core build run verify signing-identity signing-status \
+.PHONY: project test-core build run verify version signing-identity signing-status \
 	reset-accessibility clean-generated
 
 project:
@@ -62,7 +72,16 @@ build: project
 		-destination 'generic/platform=macOS' \
 		-derivedDataPath '$(DERIVED_DATA_PATH)' \
 		$(SIGNING_ARGS) \
+		$(VERSION_ARGS) \
 		build
+
+## Reports the version this build stamps into the app, as shown in the settings sidebar.
+version:
+	@if [[ -n '$(strip $(MARKETING_VERSION))' ]]; then \
+		echo 'v$(MARKETING_VERSION)'; \
+	else \
+		echo "No release tag found — the build falls back to project.yml's MARKETING_VERSION."; \
+	fi
 
 run: build
 	@osascript -e 'tell application id "$(BUNDLE_ID)" to quit' >/dev/null 2>&1 || true

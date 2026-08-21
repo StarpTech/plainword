@@ -45,14 +45,9 @@ public struct ProximityCrawlSource: ContextSource {
         }
 
         let ancestry = workspace.ancestry()
-        let windowFrame = ancestry.first { $0.facts.role == AXRole.window }?.facts.frame
-        let viewportFrame = viewportFrame(
-            from: ancestry,
-            containing: focusedFrame
-        ) ?? windowFrame
         let searchBounds = ReadOnlyContextGeometry.searchBounds(
             around: focusedFrame,
-            clippedTo: viewportFrame
+            clippedTo: workspace.clipFrame()
         )
 
         var candidates: [ReadOnlyContextCandidate] = []
@@ -195,19 +190,4 @@ public struct ProximityCrawlSource: ContextSource {
         )?.with(provenance: provenance(.inferred))
     }
 
-    private func viewportFrame(
-        from ancestry: [ContextAncestor],
-        containing focusedFrame: CGRect
-    ) -> CGRect? {
-        ancestry.lazy.compactMap { level -> CGRect? in
-            guard let role = level.facts.role,
-                  AXRole.viewport.contains(role),
-                  let frame = level.facts.frame,
-                  frame != .zero,
-                  frame.intersects(focusedFrame) || frame.contains(focusedFrame) else {
-                return nil
-            }
-            return frame
-        }.first
-    }
 }

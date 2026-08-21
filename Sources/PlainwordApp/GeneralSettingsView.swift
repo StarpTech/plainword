@@ -108,6 +108,21 @@ struct GeneralSettingsView: View {
                 }
             }
 
+            SettingsSection("Context") {
+                SettingsRow(
+                    "Attach context",
+                    detail: "Sends what Plainword reads around the focused field with "
+                        + "your requests. The panel’s switch overrides this for a "
+                        + "single app; changing it here resets those."
+                ) {
+                    Toggle("Attach context", isOn: $settings.isContextEnrichmentEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .tint(PlainwordTheme.accent)
+                }
+            }
+
             SettingsSection("Appearance") {
                 SettingsRow("Theme", detail: "Choose how Plainword appears.") {
                     PlainwordSegmentedControl(

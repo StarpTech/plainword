@@ -54,6 +54,15 @@ final class SettingsStore: ObservableObject {
         didSet { persistProfile() }
     }
 
+    /// Whether requests are given the interface around the field by default.
+    ///
+    /// The panel's own switch decides this per application and overrides what is set
+    /// here; flipping this drops those decisions so the new default holds everywhere
+    /// until the switch is used again.
+    @Published var isContextEnrichmentEnabled: Bool {
+        didSet { repository.isContextEnrichmentEnabled = isContextEnrichmentEnabled }
+    }
+
     @Published var spellingLanguageMode: SpellingLanguageMode {
         didSet { persistSpellingLanguageSettings() }
     }
@@ -179,6 +188,7 @@ final class SettingsStore: ObservableObject {
         tone = repository.profile.tone
         style = repository.profile.style
         promptExtension = repository.profile.promptExtension
+        isContextEnrichmentEnabled = repository.isContextEnrichmentEnabled
         spellingLanguageMode = storedSpellingSettings.mode
         fixedSpellingLanguageIdentifier = SpellingDictionaryResolver.resolve(
             languageIdentifier: storedSpellingSettings.fixedLanguageIdentifier,

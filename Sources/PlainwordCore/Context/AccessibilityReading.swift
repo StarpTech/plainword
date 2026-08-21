@@ -46,6 +46,8 @@ public enum ContextValue: Equatable, Sendable {
     /// Always AppKit screen coordinates. The reader performs the flip, so nothing above
     /// it has to know which way the y axis runs.
     case rect(CGRect)
+    /// Likewise AppKit screen coordinates.
+    case point(CGPoint)
     case textRange(location: Int, length: Int)
     case opaque(OpaqueRef)
     /// Two markers handed back together, which is how a marker range is asked for.
@@ -83,6 +85,11 @@ public enum ContextValue: Equatable, Sendable {
 
     public var rectValue: CGRect? {
         if case let .rect(value) = self { return value }
+        return nil
+    }
+
+    public var pointValue: CGPoint? {
+        if case let .point(value) = self { return value }
         return nil
     }
 
@@ -136,9 +143,23 @@ public protocol AccessibilityReading: AnyObject {
     /// and Chromium expose different marker vocabularies — and asking for one that is
     /// absent costs a full messaging timeout, so callers probe once and remember.
     func parameterizedAttributeNames(of element: ElementRef) -> Set<String>
+
+    /// Whatever is drawn at a point, in AppKit screen coordinates.
+    ///
+    /// The one question every toolkit answers the same way. An application that cannot
+    /// be walked — because its tree is twenty levels of anonymous wrappers, or because
+    /// its children are not published in the order they read, or because a hosted view
+    /// does not appear among its parent's children at all — can still say what it drew
+    /// at a given place, since that is what it must do to route a click.
+    ///
+    /// Declining is allowed: a reader that has no way to hit test answers `nil` and the
+    /// sources that wanted it find nothing.
+    func elementAtPosition(_ point: CGPoint) -> ElementRef?
 }
 
 public extension AccessibilityReading {
+    func elementAtPosition(_ point: CGPoint) -> ElementRef? { nil }
+
     func string(_ name: String, of element: ElementRef) -> String? {
         attribute(name, of: element)?.stringValue
     }
@@ -214,6 +235,9 @@ public enum AXName {
     public static let stringForTextMarkerRange = "AXStringForTextMarkerRange"
     public static let lengthForTextMarkerRange = "AXLengthForTextMarkerRange"
     public static let startTextMarkerForBounds = "AXStartTextMarkerForBounds"
+    /// A position rather than a rectangle. Chromium answers this where it declines the
+    /// rectangle, and one point inside the field is a less ambiguous question anyway.
+    public static let textMarkerForPosition = "AXTextMarkerForPosition"
     public static let textMarkerRangeForUIElement = "AXTextMarkerRangeForUIElement"
     public static let textMarkerRangeForUnorderedTextMarkers =
         "AXTextMarkerRangeForUnorderedTextMarkers"
@@ -223,6 +247,17 @@ public enum AXName {
         "AXPreviousParagraphStartTextMarkerForTextMarker"
     public static let nextParagraphEndTextMarkerForTextMarker =
         "AXNextParagraphEndTextMarkerForTextMarker"
+
+    /// Index arithmetic. Both engines expose the pair, and together they turn a document
+    /// into something addressable: a position can be converted to a character offset,
+    /// arithmetic done on it, and the result converted back. That is what lets a passage
+    /// of a stated length be taken in a fixed number of reads rather than by stepping
+    /// backwards a paragraph at a time and hoping the total lands somewhere useful.
+    public static let indexForTextMarker = "AXIndexForTextMarker"
+    public static let textMarkerForIndex = "AXTextMarkerForIndex"
+    /// Where a range is drawn, used to check that a passage really does sit above the
+    /// field it was taken for.
+    public static let boundsForTextMarkerRange = "AXBoundsForTextMarkerRange"
 }
 
 /// Accessibility roles the pipeline reasons about.
@@ -259,6 +294,30 @@ public enum AXRole {
         "AXDocumentArticle",
         "AXLandmarkRegion",
         "AXLandmarkForm"
+    ]
+
+    public static let sheet = "AXSheet"
+
+    /// What a modal looks like, in the vocabularies the two engines use for it.
+    ///
+    /// A modal is the one piece of layout that carries an explicit meaning about scope:
+    /// the application is saying that what is behind it is not what you are doing. A
+    /// composer inside one — a new post, a new message, a comment box opened over a page
+    /// — is writing that has nothing to do with whatever it happens to be covering.
+    public static let modalSubroles: Set<String> = [
+        "AXApplicationDialog",
+        "AXApplicationAlertDialog",
+        "AXDialog",
+        "AXSystemDialog"
+    ]
+
+    public static let modalRoles: Set<String> = [sheet]
+
+    /// Roles that hold writing rather than merely surround it. A conversation is a list,
+    /// a mail thread is a list, a document is a document; the anonymous groups between
+    /// them are layout.
+    public static let contentContainer: Set<String> = [
+        list, table, outline, document, webArea
     ]
 
     /// Landmark subroles whose content is interface chrome rather than the document.

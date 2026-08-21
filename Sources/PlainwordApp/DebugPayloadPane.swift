@@ -111,7 +111,7 @@ struct DebugCopyButton: View {
         .buttonStyle(PlainwordButtonStyle(.quiet))
         .disabled(text.isEmpty)
         .animation(PlainwordMotion.content, value: didCopy)
-        .help("Copy the complete \(subject.lowercased()) to the clipboard")
+        .hoverTip("Copy the complete \(subject.lowercased()) to the clipboard")
         .accessibilityLabel(didCopy ? "Copied \(subject)" : "Copy \(subject)")
     }
 }

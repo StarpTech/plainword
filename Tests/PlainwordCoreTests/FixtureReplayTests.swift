@@ -32,13 +32,56 @@ final class FixtureReplayTests: XCTestCase {
         }
     }
 
+    /// What each source finds on its own.
+    ///
+    /// The pipeline stops as soon as a request has what it needs, so its result says
+    /// which strategy answered first — not which one answered best. A recording made
+    /// exhaustively holds the evidence for all of them, and this is what reads it: one
+    /// line per source, whether or not it would ever have been reached.
+    private func perSource(_ fixture: AXFixture) {
+        print("──────────────────────────────────────────────────────────────────")
+        print("what each source finds on its own:")
+        for source in ContextPipeline.standardSources {
+            let reader = FixtureAccessibilityReader(fixture: fixture)
+            let workspace = ContextWorkspace(
+                reader: reader,
+                budget: ContextBudget(maximumRoundTrips: 2_000),
+                target: reader.target(),
+                profile: .profile(forBundleIdentifier: fixture.bundleIdentifier)
+            )
+            guard source.supports(workspace.target) else {
+                print("  \(source.name): does not apply here")
+                continue
+            }
+            let produced = source.read(workspace)
+            let prose = ContextSufficiency.proseLength(of: produced)
+            let reads = workspace.budget.spentRoundTrips
+            guard !produced.isEmpty else {
+                print("  \(source.name): nothing, in \(reads) reads")
+                continue
+            }
+            print("  \(source.name): \(produced.count) candidates, \(prose) chars of "
+                + "prose, \(reads) reads")
+            for candidate in produced.prefix(4) {
+                let flattened = candidate.text.replacingOccurrences(of: "\n", with: " ")
+                let text = flattened.count <= 200
+                    ? flattened
+                    : flattened.prefix(90) + " …… " + flattened.suffix(90)
+                print("      [\(candidate.kind.rawValue)] \(text)")
+            }
+            if produced.count > 4 {
+                print("      … and \(produced.count - 4) more")
+            }
+        }
+    }
+
     private func replay(_ fixture: AXFixture) -> ContextAssembly {
         let reader = FixtureAccessibilityReader(fixture: fixture)
         return ContextPipeline().assemble(
             ContextWorkspace(
                 reader: reader,
                 budget: ContextBudget(maximumRoundTrips: 2_000),
-                target: reader.target(targetKind: .sentence),
+                target: reader.target(),
                 profile: .profile(forBundleIdentifier: fixture.bundleIdentifier)
             )
         )
@@ -58,6 +101,9 @@ final class FixtureReplayTests: XCTestCase {
         answered by:    \(telemetry.contributingSources.joined(separator: ", "))
         skipped:        \(telemetry.skippedSources.joined(separator: ", "))
         satisfied after: \(telemetry.satisfiedAfterTier.map(String.init(describing:)) ?? "never")
+        engine:         \(telemetry.engine?.rawValue ?? "none")
+        prose found:    \(telemetry.harvestedProseLength) of \
+        \(telemetry.requiredProseLength) needed\(telemetry.isUnderfed ? "   ← UNDERFED" : "")
         fragments:      \(assembly.fragments.count)
         ──────────────────────────────────────────────────────────────────
         """)
@@ -65,11 +111,18 @@ final class FixtureReplayTests: XCTestCase {
             let origin = fragment.provenance.map {
                 "\($0.source)/\($0.confidence == .stated ? "stated" : "inferred")"
             } ?? "—"
-            let text = fragment.text
-                .replacingOccurrences(of: "\n", with: " ")
-                .prefix(150)
-            print("  [\(fragment.kind.rawValue)] (\(origin))\n      \(text)")
+            // Both ends, because for a passage the useful question is what sits nearest
+            // the caret — and that is at the end, where a preview of the opening never
+            // shows it.
+            let flattened = fragment.text.replacingOccurrences(of: "\n", with: " ")
+            let text = flattened.count <= 260
+                ? flattened
+                : flattened.prefix(120) + "  …\(flattened.count - 240) more…  "
+                    + flattened.suffix(120)
+            print("  [\(fragment.kind.rawValue)] (\(origin)) \(flattened.count) chars\n      \(text)")
         }
+
+        perSource(fixture)
 
         // The structural facts worth knowing about a recording, whatever it found.
         let roles = Set(fixture.nodes.compactMap { node -> String? in
@@ -84,6 +137,7 @@ final class FixtureReplayTests: XCTestCase {
         web area present: \(roles.contains(AXRole.webArea))   \
         window present: \(roles.contains(AXRole.window))
         nodes answering marker attributes: \(markerCapable.count)
+        hit tests recorded: \(fixture.hitTests?.count ?? 0)
         """)
     }
 }

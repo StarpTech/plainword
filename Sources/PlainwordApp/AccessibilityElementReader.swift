@@ -49,6 +49,17 @@ enum AccessibilityElementReader {
     /// API's multi-second default and could stall the caller for as long as it took.
     static let messagingTimeout: Float = 0.75
 
+    /// Ceiling for the reads a context harvest makes.
+    ///
+    /// Tighter than the global value, and deliberately so. A responsive application
+    /// answers an attribute read in single-digit milliseconds; a timeout is only ever
+    /// reached by one that has stopped answering, and waiting three quarters of a second
+    /// for that verdict spends nearly four times the entire time budget of a request on
+    /// learning nothing. Set per element rather than globally, which is the only scope
+    /// the API offers below the whole process — and the right one here, because the path
+    /// that applies an edit wants the patient value.
+    static let harvestMessagingTimeout: Float = 0.12
+
     static func applyGlobalMessagingTimeout() {
         _ = AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), messagingTimeout)
     }

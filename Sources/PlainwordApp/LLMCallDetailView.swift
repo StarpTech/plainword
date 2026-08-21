@@ -72,7 +72,7 @@ struct LLMCallDetailView: View {
                 }
                 .buttonStyle(PlainwordButtonStyle(.secondary))
                 .keyboardShortcut(.cancelAction)
-                .help("Close this call and return to the list")
+                .hoverTip("Close this call and return to the list")
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 12)

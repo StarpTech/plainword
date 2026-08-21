@@ -124,7 +124,7 @@ actor ContextService {
     ///
     /// Called when focus lands. A prefetch that turns out to be wasted costs nothing the
     /// author can feel; one that lands takes the whole harvest off the request path.
-    func prewarm(_ request: Request) {
+    func prewarm(_ request: Request) async {
         let profile = ApplicationProfile.profile(
             forBundleIdentifier: request.bundleIdentifier
         )
@@ -135,11 +135,45 @@ actor ContextService {
         let need = profile.need(for: request.targetKind)
         if cached(key, answering: need) != nil { return }
 
+        var harvested = harvestOnce(request, profile: profile)
+
+        // A Chromium application that had switched its tree off answers the first read
+        // with the shape of a page and none of its words: enabling it again is a request
+        // rather than a command, and the tree is built after the answer has been given.
+        // Nothing is waiting on a prefetch, so it can afford to ask twice — and the
+        // second answer is only kept if it is actually better, because a first read that
+        // came back thin for some other reason is still the truthful one.
+        if harvested.telemetry.isUnderfed,
+           ChromiumAccessibility.isChromiumHost(
+            processIdentifier: request.processIdentifier
+           ) {
+            ChromiumAccessibility.activate(processIdentifier: request.processIdentifier)
+            try? await Task.sleep(for: ChromiumAccessibility.treeBuildDelay)
+            let retried = harvestOnce(request, profile: profile)
+            if retried.telemetry.harvestedProseLength
+                > harvested.telemetry.harvestedProseLength {
+                harvested = retried
+            }
+        }
+
+        cache[key] = CachedHarvest(harvest: harvested, takenAt: clock.now, need: need)
+        log(harvested.telemetry, for: request)
+    }
+
+    /// One prefetch harvest, from a reader built for it alone.
+    ///
+    /// Built fresh each time on purpose: a retry exists because the application may have
+    /// rebuilt its tree in between, and every handle the previous reader interned
+    /// describes the tree that has just been replaced.
+    private func harvestOnce(
+        _ request: Request,
+        profile: ApplicationProfile
+    ) -> ContextHarvest {
         let reader = LiveAccessibilityReader(
             root: request.element.element,
             primaryScreenMaxY: request.primaryScreenMaxY
         )
-        let harvested = harvest(
+        return harvest(
             reader: reader,
             target: target(for: request, at: reader.rootReference),
             profile: profile,
@@ -148,8 +182,6 @@ actor ContextService {
                 duration: prefetchBudget.duration
             )
         )
-        cache[key] = CachedHarvest(harvest: harvested, takenAt: clock.now, need: need)
-        log(harvested.telemetry, for: request)
     }
 
     /// Drops what was learned about an application. Called when focus moves or the
@@ -199,7 +231,11 @@ actor ContextService {
             \(telemetry.roundTrips, privacy: .public) reads, \
             \(telemetry.nodesExamined, privacy: .public) nodes, \
             from [\(telemetry.contributingSources.joined(separator: ", "), privacy: .public)], \
-            skipped [\(telemetry.skippedSources.joined(separator: ", "), privacy: .public)]\
+            skipped [\(telemetry.skippedSources.joined(separator: ", "), privacy: .public)], \
+            engine \(telemetry.engine?.rawValue ?? "none", privacy: .public), \
+            prose \(telemetry.harvestedProseLength, privacy: .public)/\
+            \(telemetry.requiredProseLength, privacy: .public)\
+            \(telemetry.isUnderfed ? " — UNDERFED" : "", privacy: .public)\
             \(telemetry.wasTruncated ? " — truncated" : "", privacy: .public)
             """
         )

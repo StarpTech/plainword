@@ -110,11 +110,7 @@ private final class HoverTipPresenter {
 }
 
 /// Tracks the pointer over a view without taking its clicks.
-private final class HoverTipTrackingView: NSView {
-    var text = ""
-    var delay: Duration = .milliseconds(450)
-    private var pendingShow: Task<Void, Never>?
-
+private class PointerTrackingView: NSView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         for area in trackingAreas {
@@ -125,7 +121,7 @@ private final class HoverTipTrackingView: NSView {
                 rect: .zero,
                 // `activeAlways` is the whole point: the panel's application is in the
                 // background while the author writes, and any narrower scope would stop
-                // reporting exactly when the hint is needed.
+                // reporting exactly when the pointer is over it.
                 options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
                 owner: self
             )
@@ -135,6 +131,16 @@ private final class HoverTipTrackingView: NSView {
     /// Invisible to clicks, so the SwiftUI content underneath keeps its own behaviour.
     /// Tracking areas report the pointer independently of hit testing.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+private final class HoverTipTrackingView: PointerTrackingView {
+    var text = ""
+    /// How long the pointer has to rest before the hint appears.
+    ///
+    /// Short, because these hints explain controls rather than repeat labels: a wait
+    /// long enough to be noticed is a wait spent wondering whether anything is coming.
+    var delay: Duration = .milliseconds(150)
+    private var pendingShow: Task<Void, Never>?
 
     override func mouseEntered(with event: NSEvent) {
         let text = text
@@ -177,11 +183,60 @@ private struct HoverTipArea: NSViewRepresentable {
     }
 }
 
+/// Reports the pointer arriving and leaving, without taking the view's clicks.
+private final class PointerHoverReportingView: PointerTrackingView {
+    var onChange: ((Bool) -> Void)?
+
+    override func mouseEntered(with event: NSEvent) {
+        onChange?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onChange?(false)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // A control taken off screen under the pointer never hears it leave.
+        if window == nil { onChange?(false) }
+    }
+}
+
+private struct PointerHoverArea: NSViewRepresentable {
+    let onChange: (Bool) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = PointerHoverReportingView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? PointerHoverReportingView)?.onChange = onChange
+    }
+}
+
 extension View {
-    /// Shows `text` after a short hover, for content that is truncated to fit.
+    /// Reports the pointer entering and leaving, in windows where SwiftUI's own
+    /// `.onHover` cannot see it.
     ///
-    /// Prefer this over `.help(_:)` anywhere inside the proposal panel; see
-    /// `HoverTipPresenter` for why the built-in tooltip cannot work there.
+    /// Same reason as `hoverTip` above, and the same fix: the proposal panel belongs to
+    /// a background agent and is deliberately never key, so tracking scoped to an active
+    /// application reports nothing there. A control that lights up under the pointer in
+    /// settings and stays dead in the panel reads as not being a control at all.
+    func onPointerHover(_ onChange: @escaping (Bool) -> Void) -> some View {
+        overlay(PointerHoverArea(onChange: onChange))
+    }
+
+    /// Shows `text` after a short hover: what a control does, or content that had to be
+    /// truncated to fit.
+    ///
+    /// Prefer this over `.help(_:)` throughout Plainword, not only inside the proposal
+    /// panel. The panel is where AppKit's tooltip provably cannot be delivered — see
+    /// `HoverTipPresenter` — and a menu-bar agent's settings window is not dependable
+    /// either, since it is not always the key window of an active application. A hint
+    /// that appears in some places and not others is worse than none, and this one is
+    /// tracked with `activeAlways` and drawn in its own panel, so it always appears.
     func hoverTip(_ text: String) -> some View {
         overlay(HoverTipArea(text: text))
     }

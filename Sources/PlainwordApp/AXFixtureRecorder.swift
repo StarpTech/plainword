@@ -27,6 +27,7 @@ final class RecordingAccessibilityReader: AccessibilityReading {
     }
 
     private var nodes: [Int: MutableNode] = [:]
+    private var hitTests: [String: Int] = [:]
     /// Recorded so that a child discovered only through its parent still ends up in the
     /// tree the fixture describes.
     private var parents: [Int: Int] = [:]
@@ -94,6 +95,16 @@ final class RecordingAccessibilityReader: AccessibilityReading {
         return settable
     }
 
+    func elementAtPosition(_ point: CGPoint) -> ElementRef? {
+        guard let element = base.elementAtPosition(point) else { return nil }
+        hitTests[AXFixture.hitTestKey(for: point)] = element.raw
+        // A point can land on an element nothing else ever asked about, and a fixture
+        // that answered a hit test with a node it did not contain would replay as an
+        // element with no facts at all.
+        _ = node(for: element)
+        return element
+    }
+
     func parameterizedAttributeNames(of element: ElementRef) -> Set<String> {
         let names = base.parameterizedAttributeNames(of: element)
         node(for: element).parameterizedNames = names.sorted()
@@ -149,6 +160,7 @@ final class RecordingAccessibilityReader: AccessibilityReading {
         case let .element(reference): .element(reference.raw)
         case let .elements(references): .elements(references.map(\.raw))
         case let .rect(rect): .rect(rect)
+        case let .point(point): .point(point)
         case let .textRange(location, length): .textRange(location: location, length: length)
         case let .opaque(reference): .marker(Self.markerID(reference))
         case let .opaques(references): .markers(references.map(Self.markerID))
@@ -160,7 +172,9 @@ final class RecordingAccessibilityReader: AccessibilityReading {
     func fixture(
         application: String,
         bundleIdentifier: String?,
-        scenario: String
+        scenario: String,
+        capturedText: String,
+        targetKind: TextEditTargetKind
     ) -> AXFixture {
         AXFixture(
             application: application,
@@ -177,17 +191,20 @@ final class RecordingAccessibilityReader: AccessibilityReading {
                     settableAttributes: node.settableAttributes,
                     children: node.children
                 )
-            }
+            },
+            hitTests: hitTests.isEmpty ? nil : hitTests,
+            capturedText: capturedText,
+            targetKind: targetKind.rawValue
         )
     }
 }
 
-/// Captures the tree behind whatever is focused right now, and hands it to the author to
-/// save.
+/// Captures the tree behind a field the author pointed at, and writes it to the fixture
+/// folder.
 ///
-/// A recording is a verbatim copy of the writing on screen, so it is never written
-/// anywhere on its own: the save panel is how the author says which one they meant to
-/// keep and where it should go.
+/// A recording is a verbatim copy of the writing on screen. It stays on this machine, in
+/// one named folder stated back to the author after every recording, and nothing there
+/// is ever overwritten.
 @MainActor
 enum AXFixtureCapture {
     struct Result {
@@ -195,11 +212,12 @@ enum AXFixtureCapture {
         let telemetry: ContextTelemetry
     }
 
-    static func recordFocusedTree(
+    static func recordTree(
         element: AXUIElement,
         applicationName: String,
         bundleIdentifier: String?,
         targetKind: TextEditTargetKind,
+        capturedText: String,
         scenario: String,
         primaryScreenMaxY: CGFloat
     ) -> Result {
@@ -211,40 +229,87 @@ enum AXFixtureCapture {
         )
         let workspace = ContextWorkspace(
             reader: recorder,
-            budget: ContextBudget(maximumRoundTrips: 600, duration: .seconds(3)),
+            // Larger than any request would allow itself, because every source runs and
+            // nothing is waiting for the answer.
+            budget: ContextBudget(maximumRoundTrips: 2_000, duration: .seconds(8)),
             target: ContextTarget(
                 element: recorder.rootReference,
                 applicationName: applicationName,
                 bundleIdentifier: bundleIdentifier,
-                targetKind: targetKind
+                targetKind: targetKind,
+                capturedText: capturedText
             ),
             profile: .profile(forBundleIdentifier: bundleIdentifier)
         )
-        let assembly = ContextPipeline().assemble(workspace)
+        // Exhaustively, so the recording holds evidence for every strategy rather than
+        // only for the one that would have answered first today.
+        let harvest = ContextPipeline().harvestExhaustively(workspace)
+        let assembly = harvest.assembly(for: workspace.target)
         return Result(
             fixture: recorder.fixture(
                 application: applicationName,
                 bundleIdentifier: bundleIdentifier,
-                scenario: scenario
+                scenario: scenario,
+                capturedText: capturedText,
+                targetKind: targetKind
             ),
             telemetry: assembly.telemetry
         )
     }
 
-    static func save(_ fixture: AXFixture, suggestedName: String) throws -> URL? {
+    /// Where recordings go, and why they go there without asking.
+    ///
+    /// A save panel was the first design, and during a session that records a dozen
+    /// applications in a row it is the wrong one: the panel belongs to an application
+    /// with no windows of its own, so it opens behind whatever is frontmost, or on
+    /// another Space when the application being recorded is full screen — and from the
+    /// author's side that is indistinguishable from the recording having failed.
+    ///
+    /// A named folder is the standing decision instead. It is stated in the status line
+    /// after every recording, so where the writing went is never a mystery, and nothing
+    /// is ever overwritten.
+    static var directory: URL {
+        URL.homeDirectory.appending(path: "plainword-fixtures")
+    }
+
+    /// What a recording is called, given only the application and the clock.
+    ///
+    /// The author used to type a name before recording. That is one more thing to do
+    /// while the case being recorded is waiting on screen, and an empty field made every
+    /// file from an application collide. The application and the moment separate them on
+    /// their own, and a case worth keeping can be renamed afterwards.
+    static func name(application: String, recordedAt: Date) -> String {
+        let stamp = recordedAt.formatted(
+            .verbatim(
+                "\(year: .defaultDigits)\(month: .twoDigits)\(day: .twoDigits)-\(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased))\(minute: .twoDigits)\(second: .twoDigits)",
+                locale: .init(identifier: "en_US_POSIX"),
+                timeZone: .current,
+                calendar: .init(identifier: .gregorian)
+            )
+        )
+        let stem = application
+            .replacingOccurrences(of: " ", with: "-")
+            .lowercased()
+        return stem + "-" + stamp
+    }
+
+    static func write(_ fixture: AXFixture, named name: String) throws -> URL {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(fixture)
 
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = suggestedName
-        panel.allowedContentTypes = [.json]
-        panel.title = "Save accessibility recording"
-        panel.message = """
-        This file contains the text that was on screen in \(fixture.application). \
-        Read it before sharing it.
-        """
-        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+
+        let stem = (name as NSString).deletingPathExtension
+        var url = directory.appending(path: stem + ".json")
+        var attempt = 2
+        while FileManager.default.fileExists(atPath: url.path) {
+            url = directory.appending(path: "\(stem)-\(attempt).json")
+            attempt += 1
+        }
         try data.write(to: url)
         return url
     }

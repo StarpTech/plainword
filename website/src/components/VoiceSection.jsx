@@ -9,8 +9,9 @@ import { Section, SectionHeading } from './Section.jsx';
  * Layout, sizes and labels follow the design handoff's Settings screen.
  */
 
-const TONES = ['Neutral', 'Warm', 'Direct'];
-const STYLES = ['Concise', 'Detailed', 'Playful'];
+const TONES = ['Keep mine', 'Friendly', 'Professional'];
+const STYLES = ['Keep mine', 'Concise', 'Detailed'];
+const LANGUAGE_MODES = ['Automatic', 'Fixed language', 'Disabled'];
 
 function Segmented({ options, value, onChange, name }) {
   return (
@@ -47,8 +48,9 @@ function SettingsRow({ title, detail, children }) {
 }
 
 function WritingSettings() {
-  const [tone, setTone] = useState('Warm');
+  const [tone, setTone] = useState('Friendly');
   const [style, setStyle] = useState('Concise');
+  const [language, setLanguage] = useState('Automatic');
 
   return (
     <div className="flex flex-col gap-5 rounded-card border border-line bg-canvas p-6 shadow-float">
@@ -62,12 +64,33 @@ function WritingSettings() {
       <div className="flex flex-col gap-[7px]">
         <div className="pw-label">Voice</div>
         <div className="rounded-tile border border-line bg-surface px-4 py-0.5">
-          <SettingsRow title="Tone" detail="The emotional character of suggestions.">
+          <SettingsRow title="Tone" detail="How suggestions come across to the reader.">
             <Segmented name="Tone" options={TONES} value={tone} onChange={setTone} />
           </SettingsRow>
           <div className="h-px bg-line" />
-          <SettingsRow title="Style" detail="How suggestions are phrased and structured.">
+          <SettingsRow title="Style" detail="How much a suggestion says.">
             <Segmented name="Style" options={STYLES} value={style} onChange={setStyle} />
+          </SettingsRow>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-[7px]">
+        <div className="pw-label">Language</div>
+        <div className="rounded-tile border border-line bg-surface px-4 py-0.5">
+          <SettingsRow
+            title="Writing language"
+            detail="Detects the reviewed text locally and uses it as model guidance."
+          >
+            <select
+              aria-label="Writing language"
+              value={language}
+              onChange={(event) => setLanguage(event.target.value)}
+              className="cursor-pointer rounded-control border border-line-strong bg-field px-2.5 py-[5px] text-[12px] text-ink outline-none focus:border-accent"
+            >
+              {LANGUAGE_MODES.map((mode) => (
+                <option key={mode}>{mode}</option>
+              ))}
+            </select>
           </SettingsRow>
         </div>
       </div>

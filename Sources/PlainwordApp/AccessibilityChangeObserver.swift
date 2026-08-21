@@ -22,6 +22,10 @@ final class AccessibilityChangeObserver {
     private var windowElement: AXUIElement?
     private var processIdentifier: pid_t?
     private var onChange: ((AccessibilityObservedChange) -> Void)?
+    /// Whether the observed application draws with Chromium, and so has to be told —
+    /// and kept being told — that something is reading it.
+    private var isChromiumHost = false
+    private var keepAliveTimer: Timer?
 
     deinit {
         MainActor.assumeIsolated {
@@ -60,24 +64,38 @@ final class AccessibilityChangeObserver {
         let source = AXObserverGetRunLoopSource(observer)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
 
-        // Electron documents this opt-in for third-party assistive software, and other
-        // applications reject the unknown attribute without changing state. Set once on
-        // activation rather than only when focus cannot be resolved: an Electron app can
-        // answer with a partial tree instead of none, which looks like success and then
-        // yields nothing worth reading.
-        _ = AXUIElementSetAttributeValue(
-            applicationElement,
-            "AXManualAccessibility" as CFString,
-            kCFBooleanTrue
+        // Said once on activation rather than only when focus cannot be resolved: a
+        // Chromium application can answer with a partial tree instead of none, which
+        // looks like success and then yields nothing worth reading.
+        isChromiumHost = ChromiumAccessibility.isChromiumHost(
+            processIdentifier: processIdentifier
         )
+        if isChromiumHost {
+            ChromiumAccessibility.activate(processIdentifier: processIdentifier)
+        } else {
+            // Anything the framework check did not recognise is still offered Electron's
+            // opt-in, which an application that does not implement it rejects without
+            // changing state. `AXEnhancedUserInterface` is not offered so widely: it is
+            // VoiceOver's flag, and native applications change how they lay out and
+            // animate when it is set.
+            _ = AXUIElementSetAttributeValue(
+                applicationElement,
+                "AXManualAccessibility" as CFString,
+                kCFBooleanTrue
+            )
+        }
 
         addNotification(kAXFocusedUIElementChangedNotification, to: applicationElement)
         addNotification(kAXUIElementDestroyedNotification, to: applicationElement)
         rebindFocusedElement()
+        startKeepAlive()
         return true
     }
 
     func stop() {
+        keepAliveTimer?.invalidate()
+        keepAliveTimer = nil
+        isChromiumHost = false
         if let observer {
             if let focusedElement {
                 removeFocusedNotifications(from: focusedElement, observer: observer)
@@ -149,14 +167,10 @@ final class AccessibilityChangeObserver {
         windowElement = nil
 
         var element = focusedElement(from: applicationElement)
-        if element == nil {
+        if element == nil, let processIdentifier {
             // A second attempt after re-asserting the opt-in, for an application that
             // was still building its tree when this observer started.
-            _ = AXUIElementSetAttributeValue(
-                applicationElement,
-                "AXManualAccessibility" as CFString,
-                kCFBooleanTrue
-            )
+            ChromiumAccessibility.activate(processIdentifier: processIdentifier)
             element = focusedElement(from: applicationElement)
         }
         if let candidate = element,
@@ -173,6 +187,49 @@ final class AccessibilityChangeObserver {
         addNotification(kAXSelectedTextChangedNotification, to: element)
         addNotification(kAXUIElementDestroyedNotification, to: element)
         bindWindow(of: element)
+    }
+
+    /// Reads one attribute from web content every so often, for as long as a Chromium
+    /// application is the one being observed.
+    ///
+    /// Chromium counts input events against accessibility calls to decide whether the
+    /// client that switched accessibility on is still there. This tool only reads when
+    /// the author asks it to, which from that side looks exactly like having left — so
+    /// an author who types for a minute before pressing the shortcut finds the tree
+    /// already gone. One read a quarter of the interval keeps the count from ever
+    /// starting, and costs a single message every fifteen seconds.
+    private func startKeepAlive() {
+        keepAliveTimer?.invalidate()
+        keepAliveTimer = nil
+        guard isChromiumHost else { return }
+
+        keepAliveTimer = Timer.scheduledTimer(
+            withTimeInterval: ChromiumAccessibility.keepAliveInterval,
+            repeats: true
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.sendKeepAlive()
+            }
+        }
+    }
+
+    /// The focused element is the right thing to touch: in a browser it is a node inside
+    /// the page, so reading it is web-content traffic — which is the only kind the rule
+    /// counts. A read against the application element would leave the page's own tree
+    /// looking just as unused as before.
+    private func sendKeepAlive() {
+        guard let focusedElement else {
+            rebindFocusedElement()
+            return
+        }
+        // Off the main thread, because this is the one read here that nothing is waiting
+        // for. An application that has stopped answering would otherwise hold the
+        // interface still for as long as the messaging timeout allows, every fifteen
+        // seconds, to accomplish nothing at all.
+        let box = AXElementBox(focusedElement)
+        Task.detached(priority: .utility) {
+            ChromiumAccessibility.ping(box.element)
+        }
     }
 
     /// Follows the window that contains the focused element. Dragging or resizing it

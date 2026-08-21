@@ -62,7 +62,17 @@ public struct ContextPipeline: Sendable {
     public let sources: [any ContextSource]
 
     public init(sources: [any ContextSource] = ContextPipeline.standardSources) {
-        self.sources = sources.sorted { $0.tier < $1.tier }
+        // Sorted by tier, and by the order given within one. Swift's sort makes no
+        // stability promise, and two sources in the same tier are alternatives whose
+        // relative order decides which one answers first — leaving that to the sort
+        // would mean the context depended on something nobody wrote down.
+        self.sources = sources.enumerated()
+            .sorted { left, right in
+                left.element.tier == right.element.tier
+                    ? left.offset < right.offset
+                    : left.element.tier < right.element.tier
+            }
+            .map(\.element)
     }
 
     public static let standardSources: [any ContextSource] = [
@@ -70,8 +80,33 @@ public struct ContextPipeline: Sendable {
         DocumentIdentitySource(),
         MarkerPassageSource(),
         TranscriptSource(),
+        ScreenLadderSource(),
         ProximityCrawlSource()
     ]
+
+    /// Runs every source, whether or not the request still needed one.
+    ///
+    /// Only for recording. A fixture can answer exactly the questions that were asked
+    /// while it was captured, so a recording taken through the ordinary run holds
+    /// evidence for one strategy — whichever happened to answer first — and none at all
+    /// for the others. That is the wrong shape for a corpus, whose entire purpose is
+    /// settling which strategy *should* answer in a given application. A recording made
+    /// this way can be replayed against a pipeline ordered any way at all.
+    ///
+    /// It costs more reads than a real harvest, which is affordable exactly once: while
+    /// a person is deliberately capturing a case, with nothing waiting on the result.
+    public func harvestExhaustively(_ workspace: ContextWorkspace) -> ContextHarvest {
+        var candidates: [ReadOnlyContextCandidate] = []
+        for source in sources where source.supports(workspace.target) {
+            let produced = source.read(workspace)
+            if !produced.isEmpty {
+                workspace.telemetry.contributingSources.append(source.name)
+            }
+            candidates.append(contentsOf: produced)
+        }
+        workspace.telemetry.roundTrips = workspace.budget.spentRoundTrips
+        return ContextHarvest(candidates: candidates, telemetry: workspace.telemetry)
+    }
 
     public func assemble(_ workspace: ContextWorkspace) -> ContextAssembly {
         harvest(workspace).assembly(for: workspace.target)
@@ -119,6 +154,9 @@ public struct ContextPipeline: Sendable {
         workspace.telemetry.roundTrips = workspace.budget.spentRoundTrips
         workspace.telemetry.reachedRoundTripLimit = workspace.budget.reachedRoundTripLimit
         workspace.telemetry.reachedTimeLimit = workspace.budget.reachedTimeLimit
+        workspace.telemetry.requiredProseLength =
+            ContextSufficiency.requiredProseLength(for: need)
+        workspace.telemetry.harvestedProseLength = ContextSufficiency.proseLength(of: candidates)
 
         return ContextHarvest(candidates: candidates, telemetry: workspace.telemetry)
     }

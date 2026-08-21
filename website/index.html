@@ -23,6 +23,17 @@
     <meta name="theme-color" content="#EFE9DD" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#191612" media="(prefers-color-scheme: dark)" />
 
+    <!-- A stored theme choice, applied before the first paint so the page never
+         flashes the other one. Absent, the system preference stands. -->
+    <script>
+      try {
+        var pwTheme = localStorage.getItem('pw-theme');
+        if (pwTheme === 'light' || pwTheme === 'dark') {
+          document.documentElement.dataset.theme = pwTheme;
+        }
+      } catch (e) {}
+    </script>
+
     <!-- Sharing ----------------------------------------------------------
          One 1200x630 card, absolute URL, declared dimensions: LinkedIn, Slack,
          X, Facebook, iMessage and WhatsApp all read some subset of this. Rebuild
@@ -104,7 +115,9 @@
               "Reads the conversation around the cursor for context",
               "Writes in your own tone, style and language",
               "Runs fully locally with Ollama, or on any OpenAI-compatible model",
-              "Proposes every edit before it changes anything"
+              "Proposes every edit before it changes anything",
+              "Review and transform shortcuts you can rebind",
+              "Pause suggestions, or exclude individual apps"
             ],
             "offers": {
               "@type": "Offer",

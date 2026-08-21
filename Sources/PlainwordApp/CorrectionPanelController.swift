@@ -33,16 +33,21 @@ private enum ContextReceiptMetrics {
     static let rowSpacing: CGFloat = 3
     static let captionHeight: CGFloat = 14
     static let controlRowHeight: CGFloat = 22
+    static let actionRowHeight: CGFloat = 26
     static let sectionSpacing: CGFloat = 7
 
-    /// Depends only on how much was found, never on the switch — so flipping it moves
-    /// nothing on screen.
-    static func height(forItemCount count: Int) -> CGFloat {
+    /// Depends on how much was found, and on whether the switch now says something the
+    /// suggestion on screen was not made under — the row offering to ask again is the
+    /// one thing here that appears in answer to the switch.
+    static func height(forItemCount count: Int, includesRerunAction: Bool) -> CGFloat {
         var height = verticalPadding * 2 + controlRowHeight
         if count > 0 {
             height += sectionSpacing + 1 + sectionSpacing
                 + CGFloat(count) * rowHeight
                 + CGFloat(count - 1) * rowSpacing
+        }
+        if includesRerunAction {
+            height += sectionSpacing + actionRowHeight
         }
         return height
     }
@@ -193,6 +198,9 @@ private final class CorrectionPanelModel: ObservableObject {
         var contextApplicationName = ""
         var isContextSendingEnabled = false
         var contextWasSentWithSuggestion = false
+        /// Whether there is a request behind the suggestion on screen that the panel
+        /// can run again.
+        var canRerunUnderCurrentContext = false
         var canRetry = false
     }
 
@@ -236,8 +244,22 @@ private final class CorrectionPanelModel: ObservableObject {
             ? state.isContextSendingEnabled
             : state.contextWasSentWithSuggestion
     }
+    /// Whether the switch now says something other than what the suggestion on screen
+    /// was made under, with a request behind it that can be asked again.
+    ///
+    /// Flipping the switch cannot change a suggestion that has already been made. Left
+    /// at that, acting on the decision would mean closing the panel and starting over,
+    /// so the section offers to ask again under what the switch now says.
+    var showsRerunAction: Bool {
+        state.canRerunUnderCurrentContext
+            && state.phase == .ready
+            && state.isContextSendingEnabled != state.contextWasSentWithSuggestion
+    }
     var contextReceiptHeight: CGFloat {
-        ContextReceiptMetrics.height(forItemCount: state.contextReceipt.count)
+        ContextReceiptMetrics.height(
+            forItemCount: state.contextReceipt.count,
+            includesRerunAction: showsRerunAction
+        )
     }
     /// The receipt accounts for what a request carries: what the suggestion on screen
     /// was given, or — at a prompt — what the request about to be sent will be given.
@@ -350,6 +372,7 @@ private final class CorrectionPanelModel: ObservableObject {
             contextApplicationName: state.contextApplicationName,
             isContextSendingEnabled: state.isContextSendingEnabled,
             contextWasSentWithSuggestion: state.contextWasSentWithSuggestion,
+            canRerunUnderCurrentContext: state.canRerunUnderCurrentContext,
             canRetry: state.canRetry
         )
         let changes = { self.state = nextState }
@@ -364,12 +387,14 @@ private final class CorrectionPanelModel: ObservableObject {
         _ contextReceipt: [ReadOnlyContextReceiptItem],
         applicationName: String,
         isSendingEnabled: Bool,
-        wasSentWithSuggestion: Bool
+        wasSentWithSuggestion: Bool,
+        canRerunUnderCurrentContext: Bool = false
     ) {
         state.contextReceipt = contextReceipt
         state.contextApplicationName = applicationName
         state.isContextSendingEnabled = isSendingEnabled
         state.contextWasSentWithSuggestion = wasSentWithSuggestion
+        state.canRerunUnderCurrentContext = canRerunUnderCurrentContext
         state.isContextReceiptExpanded = false
     }
 
@@ -481,6 +506,7 @@ final class CorrectionPanelController {
     private var onSubmitPrompt: ((String) -> Void)?
     private var onRetry: (() -> Void)?
     private var onSetContextSendingEnabled: ((Bool) -> Void)?
+    private var onRerunUnderCurrentContext: (() -> Void)?
     private var targetFrame: NSRect?
     private var userPositionedOrigin: NSPoint?
     private var streamingResizeTask: Task<Void, Never>?
@@ -513,6 +539,9 @@ final class CorrectionPanelController {
                     },
                     onSetContextSendingEnabled: { [weak self] isEnabled in
                         self?.setContextSendingEnabled(isEnabled)
+                    },
+                    onRerunUnderCurrentContext: { [weak self] in
+                        self?.onRerunUnderCurrentContext?()
                     },
                     onDrag: { [weak self] origin in
                         self?.movePanel(to: origin)
@@ -567,6 +596,7 @@ final class CorrectionPanelController {
         self.onBack = nil
         self.onRequestPrompt = nil
         self.onSubmitPrompt = nil
+        self.onRerunUnderCurrentContext = nil
         cancelScheduledStreamingResize()
         model.begin(pointerEdge: verticalPlacement.pointerEdge)
         configurePlacement(near: anchor)
@@ -588,7 +618,8 @@ final class CorrectionPanelController {
         onDismiss: @escaping () -> Void,
         onBack: (() -> Void)? = nil,
         onRequestPrompt: @escaping () -> Void,
-        onSetContextSendingEnabled: ((Bool) -> Void)? = nil
+        onSetContextSendingEnabled: ((Bool) -> Void)? = nil,
+        onRerunUnderCurrentContext: (() -> Void)? = nil
     ) {
         let shouldAnimateResize = panel.isVisible
         self.onAccept = onAccept
@@ -597,6 +628,7 @@ final class CorrectionPanelController {
         self.onRequestPrompt = onRequestPrompt
         self.onSubmitPrompt = nil
         self.onSetContextSendingEnabled = onSetContextSendingEnabled
+        self.onRerunUnderCurrentContext = onRerunUnderCurrentContext
         cancelScheduledStreamingResize()
         // Text that streamed in is already the answer. Settling it in place reads as the
         // same result gaining its controls, so it is adopted rather than replaced.
@@ -618,7 +650,8 @@ final class CorrectionPanelController {
             contextReceipt,
             applicationName: contextApplicationName,
             isSendingEnabled: isContextSendingEnabled,
-            wasSentWithSuggestion: contextWasSentWithSuggestion
+            wasSentWithSuggestion: contextWasSentWithSuggestion,
+            canRerunUnderCurrentContext: onRerunUnderCurrentContext != nil
         )
         model.transition(
             to: .ready,
@@ -658,6 +691,7 @@ final class CorrectionPanelController {
         self.onRequestPrompt = nil
         self.onSubmitPrompt = onSubmit
         self.onSetContextSendingEnabled = onSetContextSendingEnabled
+        self.onRerunUnderCurrentContext = nil
         cancelScheduledStreamingResize()
         model.beginPrompt(
             pointerEdge: verticalPlacement.pointerEdge,
@@ -678,6 +712,18 @@ final class CorrectionPanelController {
         presentPanel(makeKey: true)
     }
 
+    /// Reflects a decision made outside the panel — the setting behind the switch
+    /// changing while the panel is open.
+    ///
+    /// The callback runs the other way, carrying what the author chose here back to
+    /// the app, so it is deliberately not fired: this is the same news arriving.
+    func updateContextSendingEnabled(_ isEnabled: Bool) {
+        guard model.isContextSendingEnabled != isEnabled else { return }
+        model.setContextSendingEnabled(isEnabled)
+        targetFrame = nil
+        resizeForContent(animated: true)
+    }
+
     /// Hands the open prompt the context that was read while it was being typed into.
     func updateContextReceipt(_ contextReceipt: [ReadOnlyContextReceiptItem]) {
         model.updateContextReceipt(contextReceipt)
@@ -695,6 +741,7 @@ final class CorrectionPanelController {
         self.onBack = nil
         self.onRequestPrompt = onOpen
         self.onSubmitPrompt = nil
+        self.onRerunUnderCurrentContext = nil
         cancelScheduledStreamingResize()
         model.beginPromptTrigger(pointerEdge: verticalPlacement.pointerEdge)
         configurePlacement(near: anchor)
@@ -730,11 +777,16 @@ final class CorrectionPanelController {
         resizeForContent(animated: true)
     }
 
-    /// The switch records a preference. It issues no request, does not disturb the
-    /// suggestion on screen, and does not change the panel's size — nothing moves.
+    /// The switch records a preference. It issues no request and leaves the suggestion
+    /// on screen exactly as it was made; what it can change is the row underneath it,
+    /// which offers to ask again under the setting it now holds.
     private func setContextSendingEnabled(_ isEnabled: Bool) {
         model.setContextSendingEnabled(isEnabled)
         onSetContextSendingEnabled?(isEnabled)
+        targetFrame = nil
+        // Matches the content animation in the model, so the section and the panel
+        // around it take on the offered row together.
+        resizeForContent(animated: true)
     }
 
     private func toggleContextReceipt() {
@@ -851,6 +903,7 @@ final class CorrectionPanelController {
     func showFailure(_ message: String, onRetry: (() -> Void)? = nil) {
         cancelScheduledStreamingResize()
         self.onRetry = onRetry
+        self.onRerunUnderCurrentContext = nil
         model.setCanRetry(onRetry != nil)
         model.transition(to: .failure(message))
         configurePlacement(near: anchor)
@@ -871,6 +924,7 @@ final class CorrectionPanelController {
         onRequestPrompt = nil
         onSubmitPrompt = nil
         onRetry = nil
+        onRerunUnderCurrentContext = nil
         userPositionedOrigin = nil
         guard panel.isVisible else {
             dismiss()
@@ -892,6 +946,7 @@ final class CorrectionPanelController {
         appliedDismissTask?.cancel()
         appliedDismissTask = nil
         onRetry = nil
+        onRerunUnderCurrentContext = nil
         onAccept = nil
         onDismiss = nil
         onBack = nil
@@ -1784,9 +1839,11 @@ private struct CrossAppProposalView: View {
     let onPreviewModeChange: (SuggestionPreviewMode) -> Void
     let onToggleContextReceipt: () -> Void
     let onSetContextSendingEnabled: (Bool) -> Void
+    let onRerunUnderCurrentContext: () -> Void
     let onDrag: (NSPoint) -> Void
     @FocusState private var promptFocused: Bool
     @State private var hoveredTransformShortcut: TransformShortcut?
+    @State private var isHoveringRerunAction = false
 
     @ViewBuilder
     var body: some View {
@@ -2224,6 +2281,9 @@ private struct CrossAppProposalView: View {
                 .opacity(model.contextIsAttached ? 1 : 0.45)
             }
 
+            if model.showsRerunAction {
+                rerunActionRow
+            }
         }
         .padding(.horizontal, 13)
         .padding(.vertical, ContextReceiptMetrics.verticalPadding)
@@ -2240,11 +2300,57 @@ private struct CrossAppProposalView: View {
     }
 
     /// At a prompt the switch decides what the request being written will carry. Under
-    /// a suggestion it is too late for that one, so it decides for the next.
+    /// a suggestion it is too late for that one, so it decides for the next — and the
+    /// row below it offers to make this one over again as one of those.
     private var contextSwitchTip: String {
         model.phase == .prompting
             ? "Attach what Plainword found here to this request."
-            : "Attach what Plainword found here to your next suggestion."
+            : "Attach what Plainword found here to your next suggestion, or ask again below to remake this one."
+    }
+
+    /// Turning the switch changes nothing about a suggestion that has already been
+    /// made. This is how the author acts on the decision they just made without
+    /// closing the panel and starting the request over from the field.
+    private var rerunActionRow: some View {
+        Button(action: onRerunUnderCurrentContext) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.clockwise")
+                    .font(PlainwordFont.ui(10, weight: .bold))
+                Text(rerunActionTitle)
+                    .font(PlainwordFont.ui(11.5, weight: .bold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+        }
+        .buttonStyle(ContextActionButtonStyle(isHovering: isHoveringRerunAction))
+        // The panel is never the key window, so the pointer has to be tracked the way
+        // the hints are — see `onPointerHover`.
+        .onPointerHover { isHoveringRerunAction = $0 }
+        .transition(PlainwordMotion.rise)
+        .hoverTip(
+            model.isContextSendingEnabled
+                ? """
+                Ask again, this time sending what is listed above.
+                The suggestion on screen was made without it.
+                """
+                : """
+                Ask again without sending what is listed above.
+                The suggestion on screen was made with it.
+                """
+        )
+        .accessibilityLabel(rerunActionTitle)
+        .accessibilityHint(
+            model.isContextSendingEnabled
+                ? "Runs the same request again with the text found around this field attached"
+                : "Runs the same request again without the text found around this field attached"
+        )
+    }
+
+    private var rerunActionTitle: String {
+        model.isContextSendingEnabled
+            ? "Try again with context"
+            : "Try again without context"
     }
 
     /// Switching this sends nothing. Under a finished suggestion it changes nothing
@@ -2663,6 +2769,52 @@ private struct CrossAppProposalView: View {
             result.append(fragment)
         }
         return result
+    }
+}
+
+/// A full-width row inside the context receipt that offers to act on what the switch
+/// above it now says.
+///
+/// It rests in the accent's muted tint rather than a fill of its own, so it does not
+/// compete with the panel's primary action — and fills in properly under the pointer,
+/// because a row that never answers the pointer reads as a label rather than a control.
+private struct ContextActionButtonStyle: ButtonStyle {
+    let isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isActive = isHovering || configuration.isPressed
+        return configuration.label
+            .foregroundStyle(
+                isActive ? PlainwordTheme.accentText : PlainwordTheme.accent
+            )
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: ContextReceiptMetrics.actionRowHeight)
+            .background(
+                background(isPressed: configuration.isPressed),
+                in: RoundedRectangle(
+                    cornerRadius: PlainwordTheme.smallCornerRadius,
+                    style: .continuous
+                )
+            )
+            .overlay {
+                RoundedRectangle(
+                    cornerRadius: PlainwordTheme.smallCornerRadius,
+                    style: .continuous
+                )
+                .strokeBorder(
+                    isActive ? .clear : PlainwordTheme.accent.opacity(0.4),
+                    lineWidth: 1
+                )
+            }
+            .contentShape(Rectangle())
+            .animation(PlainwordMotion.content, value: isHovering)
+            .animation(PlainwordMotion.content, value: configuration.isPressed)
+    }
+
+    private func background(isPressed: Bool) -> Color {
+        if isPressed { return PlainwordTheme.accentStrong }
+        return isHovering ? PlainwordTheme.accent : PlainwordTheme.accentMuted
     }
 }
 

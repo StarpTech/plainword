@@ -52,6 +52,20 @@ public enum ReadOnlyContextKind: String, CaseIterable, Equatable, Hashable, Send
         self == .relatedPrecedingContent
     }
 
+    /// Whether this names the place the writing is going rather than material found
+    /// near it. What a fresh draft has to fit is the destination — its form, its
+    /// conventions, its usual length — so the prompt presents these kinds together
+    /// under one tag instead of as siblings of the content they describe.
+    var describesDestination: Bool {
+        switch self {
+        case .sourceApplication, .fieldLabel, .fieldIdentity, .fieldPlaceholder,
+             .fieldDescription, .fieldHelp, .documentTitle:
+            true
+        case .relatedPrecedingContent, .relatedContent:
+            false
+        }
+    }
+
     /// Whether a run of fragments of this kind reads as one continuous passage. When it
     /// does, dropping a fragment from the middle silently joins two pieces of text that
     /// were never adjacent, so the omission has to be marked.

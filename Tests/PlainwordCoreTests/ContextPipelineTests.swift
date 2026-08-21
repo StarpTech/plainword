@@ -149,6 +149,61 @@ final class ContextPipelineTests: XCTestCase {
         )
     }
 
+    /// A web composer buried under the wrapper nodes a real page puts between the
+    /// document and its editor. Nothing in the chain publishes a frame or a role worth
+    /// reading; the whole point is the distance.
+    private func deeplyNestedWebComposerFixture() -> AXFixture {
+        let wrapperDepth = 36
+        let fieldID = 3 + wrapperDepth
+        var nodes: [AXFixture.Node] = [
+            .init(
+                id: 1,
+                attributes: [
+                    AXName.role: .string(AXRole.window),
+                    AXName.title: .string("Compose — Fastmail"),
+                    AXName.frame: .rect(CGRect(x: 0, y: 0, width: 1_200, height: 800))
+                ],
+                children: [2]
+            ),
+            .init(
+                id: 2,
+                attributes: [
+                    AXName.role: .string(AXRole.webArea),
+                    AXName.url: .string("https://app.fastmail.com/mail/compose?u=9f2"),
+                    AXName.frame: .rect(CGRect(x: 0, y: 0, width: 1_200, height: 760))
+                ],
+                children: [3]
+            )
+        ]
+        for offset in 0..<wrapperDepth {
+            let id = 3 + offset
+            nodes.append(
+                .init(
+                    id: id,
+                    attributes: [AXName.role: .string("AXGroup")],
+                    children: [id + 1]
+                )
+            )
+        }
+        nodes.append(
+            .init(
+                id: fieldID,
+                attributes: [
+                    AXName.role: .string(AXRole.textArea),
+                    AXName.isEditable: .boolean(true),
+                    AXName.frame: .rect(CGRect(x: 40, y: 400, width: 700, height: 200))
+                ]
+            )
+        )
+        return AXFixture(
+            application: "Safari",
+            bundleIdentifier: "com.apple.Safari",
+            scenario: "compose-in-web-mail",
+            focusedNode: fieldID,
+            nodes: nodes
+        )
+    }
+
     private func assemble(
         _ fixture: AXFixture,
         targetKind: TextEditTargetKind = .sentence,
@@ -245,6 +300,18 @@ final class ContextPipelineTests: XCTestCase {
 
         XCTAssertTrue(titles.contains { $0.contains("app.slack.com/client/T01/C02") })
         XCTAssertFalse(titles.contains { $0.contains("thread=17") })
+    }
+
+    /// A browser tab title reaches the prompt from the window it is drawn in, and in a
+    /// web composer that window is dozens of anonymous grouping nodes above the caret.
+    /// Ranked by node distance the title scored below the relevance floor and never
+    /// travelled — losing the one fragment that says which site the writing is for.
+    func testTabTitleSurvivesADeeplyNestedComposer() {
+        let (assembly, _) = assemble(deeplyNestedWebComposerFixture())
+        let titles = assembly.fragments.filter { $0.kind == .documentTitle }.map(\.text)
+
+        XCTAssertTrue(titles.contains("Compose — Fastmail"))
+        XCTAssertTrue(titles.contains { $0.contains("app.fastmail.com/mail/compose") })
     }
 
     func testReadableAddressKeepsWhereAndDropsHow() {

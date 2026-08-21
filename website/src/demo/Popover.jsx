@@ -1,4 +1,4 @@
-import { Paperclip } from 'lucide-react';
+import { Paperclip, WandSparkles } from 'lucide-react';
 
 /**
  * The correction popover, rebuilt to the handoff's measurements: a 352px panel
@@ -41,7 +41,7 @@ function PanelButton({
   children,
 }) {
   const base =
-    'inline-flex h-7 items-center gap-1 rounded-control text-[12px] font-bold whitespace-nowrap transition-colors';
+    'inline-flex h-7 items-center gap-1.5 rounded-control text-[12px] font-bold whitespace-nowrap transition-colors';
   const skin =
     variant === 'primary'
       ? `px-3 text-accent-ink ${pressed ? 'bg-accent-strong' : 'bg-accent'} ${onClick && !disabled ? 'hover:bg-accent-strong' : ''}`
@@ -50,7 +50,7 @@ function PanelButton({
     <>
       {children}
       {hint && (
-        <span className="font-mono text-[10px]" style={{ opacity: hintOpacity }}>
+        <span className="font-mono text-[11px]" style={{ opacity: hintOpacity }}>
           {hint}
         </span>
       )}
@@ -114,15 +114,63 @@ function ContextReceipt({ receipt }) {
         <span className="text-[11.5px] text-ink">Attach context from {receipt.app}</span>
       </div>
       <div className="h-px bg-line" />
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-[3px]">
         {receipt.rows.map(([key, value]) => (
-          <div key={key} className="flex items-baseline gap-2 text-[11px]">
-            <span className="w-[72px] shrink-0 font-mono text-[9.5px] text-ink-faint">{key}</span>
-            <span>{value}</span>
+          <div key={key} className="flex h-[22px] items-baseline gap-2 text-[11px]">
+            <span className="w-[72px] shrink-0 truncate font-mono text-[9.5px] text-ink-faint uppercase">
+              {key}
+            </span>
+            <span className="min-w-0 truncate">{value}</span>
           </div>
         ))}
       </div>
     </div>
+  );
+}
+
+/** The footer paperclip: the app offers it at a prompt and under a suggestion. */
+function ReceiptToggle({ open, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={open}
+      aria-label="Show what was sent with this request"
+      className={
+        'grid h-6 w-6 cursor-pointer place-items-center rounded-md bg-accent-muted text-accent transition-transform ' +
+        (open ? '-rotate-[20deg]' : '')
+      }
+    >
+      <Paperclip className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
+    </button>
+  );
+}
+
+/**
+ * The panel's chrome glyphs: 22pt, quiet until the pointer finds them.
+ *
+ * As with the footer buttons, one without an `onClick` is a still of a control
+ * the demo does not implement rather than a press that goes nowhere.
+ */
+function GlyphButton({ label, onClick, children }) {
+  const base = 'grid h-[22px] w-[22px] shrink-0 place-items-center rounded-md text-[12px] text-ink-soft';
+  if (!onClick) {
+    return (
+      <span className={base} title={label} aria-hidden="true">
+        {children}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className={`${base} cursor-pointer transition-colors hover:bg-raised hover:text-ink`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -159,17 +207,17 @@ export default function Popover({ scene, state, actions = {}, pointer = 'top', c
           <img src="/images/app-icon.png" alt="" className="h-5 w-5 shrink-0 rounded-[5px]" />
           <span className="truncate font-serif text-[14.5px] font-medium">{title}</span>
           <span className="flex-1" />
+          {ready && (
+            <GlyphButton label="Custom edit">
+              <WandSparkles className="h-[13px] w-[13px]" strokeWidth={2} aria-hidden="true" />
+            </GlyphButton>
+          )}
           {detail && (
             <span className="font-mono text-[10px] whitespace-nowrap text-ink-faint">{detail}</span>
           )}
-          <button
-            type="button"
-            onClick={actions.dismiss}
-            aria-label="Dismiss the suggestion"
-            className="grid h-[22px] w-[22px] shrink-0 cursor-pointer place-items-center rounded-md text-[12px] text-ink-soft transition-colors hover:bg-raised"
-          >
+          <GlyphButton label="Close popover" onClick={actions.dismiss}>
             ✕
-          </button>
+          </GlyphButton>
         </div>
 
         {/* Body --------------------------------------------------------- */}
@@ -244,21 +292,24 @@ export default function Popover({ scene, state, actions = {}, pointer = 'top', c
           </div>
         )}
 
-        {receiptOpen && ready && <ContextReceipt receipt={scene.receipt} />}
+        {receiptOpen && (ready || prompting) && <ContextReceipt receipt={scene.receipt} />}
 
         {/* Footer ------------------------------------------------------- */}
         <div className="flex h-12 items-center gap-[7px] border-t border-line px-3">
           {working && (
             <>
-              <span className="font-mono text-[10px] text-ink-faint">
-                {phase === 'processing' ? 'connecting…' : 'writing…'}
-              </span>
+              {phase === 'streaming' && (
+                <span className="font-mono text-[10px] text-ink-faint">writing…</span>
+              )}
               <span className="flex-1" />
               <PanelButton onClick={actions.dismiss}>Cancel</PanelButton>
             </>
           )}
           {prompting && (
             <>
+              {scene.receipt && (
+                <ReceiptToggle open={receiptOpen} onClick={actions.toggleReceipt} />
+              )}
               <span className="flex-1" />
               <PanelButton hint="esc" onClick={actions.dismiss}>
                 Cancel
@@ -276,18 +327,7 @@ export default function Popover({ scene, state, actions = {}, pointer = 'top', c
           )}
           {ready && (
             <>
-              <button
-                type="button"
-                onClick={actions.toggleReceipt}
-                aria-expanded={receiptOpen}
-                aria-label="Show what was sent with this request"
-                className={
-                  'grid h-6 w-6 cursor-pointer place-items-center rounded-md bg-accent-muted text-accent transition-transform hover:bg-raised ' +
-                  (receiptOpen ? '-rotate-[20deg]' : '')
-                }
-              >
-                <Paperclip className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
-              </button>
+              <ReceiptToggle open={receiptOpen} onClick={actions.toggleReceipt} />
               <span className="flex-1" />
               <PanelButton hint="esc" onClick={actions.dismiss}>
                 Dismiss

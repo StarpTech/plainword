@@ -1,4 +1,5 @@
 import { GITHUB_URL } from '../content.js';
+import ThemeToggle from './ThemeToggle.jsx';
 import { CONTAINER } from './Section.jsx';
 
 const LINKS = [
@@ -18,17 +19,20 @@ export default function Footer() {
           <img src="/images/app-icon.png" alt="" className="h-[18px] w-[18px] rounded-[5px]" />
           <span>Plainword · free &amp; open source</span>
         </div>
-        <nav className="flex flex-wrap gap-x-5 gap-y-2 text-xs">
-          {LINKS.map((link) => (
-            <a
-              key={link.label}
-              href={link.href}
-              className="text-ink-faint transition-colors hover:text-accent-strong"
-            >
-              {link.label}
-            </a>
-          ))}
-        </nav>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <nav className="flex flex-wrap gap-x-5 gap-y-2 text-xs">
+            {LINKS.map((link) => (
+              <a
+                key={link.label}
+                href={link.href}
+                className="text-ink-faint transition-colors hover:text-accent-strong"
+              >
+                {link.label}
+              </a>
+            ))}
+          </nav>
+          <ThemeToggle />
+        </div>
       </div>
     </footer>
   );

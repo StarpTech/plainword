@@ -71,8 +71,26 @@ public struct ContextTelemetry: Equatable, Sendable {
     /// Sources that were never reached because the need was already met.
     public var skippedSources: [String] = []
     public var satisfiedAfterTier: ContextTier?
+    /// Which engine published the document the field sits in, once anything has looked.
+    public var engine: HostEngine?
+
+    /// How much prose this request had to find before it could be called answered, and
+    /// how much it actually found.
+    ///
+    /// Recorded because the pipeline's most common failure leaves no trace anywhere
+    /// else: a request that goes out with a fraction of the writing it needed produces a
+    /// worse suggestion and nothing that says why. A run that ends short is the number
+    /// worth watching per application — it is what "the context is not very good here"
+    /// means, stated in a form that can be compared before and after a change.
+    public var requiredProseLength = 0
+    public var harvestedProseLength = 0
 
     public init() {}
 
     public var wasTruncated: Bool { reachedRoundTripLimit || reachedTimeLimit }
+
+    /// The request needed surrounding prose and did not find enough of it.
+    public var isUnderfed: Bool {
+        requiredProseLength > 0 && harvestedProseLength < requiredProseLength
+    }
 }

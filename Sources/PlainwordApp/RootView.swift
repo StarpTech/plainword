@@ -132,8 +132,8 @@ struct RootView: View {
     }
 
     /// In the light the selected item is a lifted sheet, and a soft shadow says so.
-    /// In the dark that same sheet is *darker* than the sidebar around it, and a
-    /// black shadow under a dark shape only smears its edge — so the edge is drawn.
+    /// Dark mode uses a quiet neutral wash instead: navigation selection stays
+    /// distinct without competing with green's enabled and active-state meaning.
     @ViewBuilder
     private var selectedBackground: some View {
         let shape = RoundedRectangle(
@@ -142,10 +142,7 @@ struct RootView: View {
         )
         if colorScheme == .dark {
             shape
-                .fill(PlainwordTheme.surface)
-                .overlay {
-                    shape.strokeBorder(PlainwordTheme.strongSeparator, lineWidth: 1)
-                }
+                .fill(PlainwordTheme.selectedSurface)
         } else {
             shape
                 .fill(PlainwordTheme.surface)

@@ -119,6 +119,12 @@ public final class ContextWorkspace {
         return reader.parameterized(name, of: element, parameter: parameter)
     }
 
+    public func elementAtPosition(_ point: CGPoint) -> ElementRef? {
+        guard budget.charge() else { return nil }
+        telemetry.roundTrips += 1
+        return reader.elementAtPosition(point)
+    }
+
     public func isSettable(_ name: String, of element: ElementRef) -> Bool {
         guard budget.charge() else { return false }
         telemetry.roundTrips += 1
@@ -232,6 +238,92 @@ public final class ContextWorkspace {
         }
         cachedAncestry = levels
         return levels
+    }
+
+    /// What the document around the field is, and how it can be asked about its text.
+    public struct DocumentFacts: Equatable, Sendable {
+        /// The element that answers marker questions: the enclosing web area, or the
+        /// focused element itself when it is one. Absent in a native application.
+        public let element: ElementRef?
+        public let markerVocabulary: Set<String>
+        public let engine: HostEngine
+
+        public var supportsIndexArithmetic: Bool {
+            HostEngine.supportsIndexArithmetic(markerVocabulary)
+        }
+    }
+
+    private var cachedDocument: DocumentFacts?
+
+    /// Settles which engine this field belongs to before any source spends on it.
+    ///
+    /// One probe answers three questions that every later decision depends on — whether
+    /// there is a document at all, what it will answer about its own text, and which
+    /// engine's rules apply — and asking an application which parameterized attributes
+    /// it implements is a single read. Doing it here rather than inside one source means
+    /// the answer is available to all of them and is recorded whether or not any of them
+    /// managed to use it.
+    public func document() -> DocumentFacts {
+        if let cachedDocument { return cachedDocument }
+
+        let element: ElementRef?
+        if facts(of: target.element).role == AXRole.webArea {
+            element = target.element
+        } else {
+            element = nearestAncestor(withRoleIn: [AXRole.webArea, AXRole.document])?.element
+        }
+        let vocabulary = element.map { parameterizedAttributeNames(of: $0) } ?? []
+        let document = DocumentFacts(
+            element: element,
+            markerVocabulary: vocabulary,
+            engine: HostEngine.classify(
+                markerVocabulary: vocabulary,
+                hasDocumentElement: element != nil
+            )
+        )
+        cachedDocument = document
+        telemetry.engine = document.engine
+        return document
+    }
+
+    /// The dialog the field is inside, if it is inside one.
+    ///
+    /// Everything a source reads should stop here. A modal is an application stating
+    /// that the page behind it is not the task in hand, and it is the only piece of
+    /// layout that says so outright — so a composer opened over a feed, an inbox or an
+    /// article gets the dialog's own contents as its surroundings and nothing else.
+    /// Without this, a new post written over a feed is handed the feed.
+    public func enclosingModal() -> ContextAncestor? {
+        ancestry().first { level in
+            if let subrole = level.facts.subrole,
+               AXRole.modalSubroles.contains(subrole) {
+                return true
+            }
+            if let role = level.facts.role, AXRole.modalRoles.contains(role) {
+                return true
+            }
+            return false
+        }
+    }
+
+    /// The region on screen a source may look within: the dialog if there is one, then
+    /// the scrolling view the field sits in, then the window.
+    public func clipFrame() -> CGRect? {
+        if let modal = enclosingModal(), let frame = modal.facts.frame, frame != .zero {
+            return frame
+        }
+        guard let focusedFrame = focusedFrame() else { return nil }
+        let viewport = ancestry().lazy.compactMap { level -> CGRect? in
+            guard let role = level.facts.role,
+                  AXRole.viewport.contains(role),
+                  let frame = level.facts.frame,
+                  frame != .zero,
+                  frame.intersects(focusedFrame) || frame.contains(focusedFrame) else {
+                return nil
+            }
+            return frame
+        }.first
+        return viewport ?? ancestry().first { $0.facts.role == AXRole.window }?.facts.frame
     }
 
     public func focusedFrame() -> CGRect? {

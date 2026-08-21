@@ -37,6 +37,8 @@ export default function Providers() {
           <p className="mt-4 text-pretty text-ink-soft">
             Point Plainword at whatever you already use. Your writing goes to that provider and
             nowhere else &mdash; no Plainword server in the middle, and no subscription on top.
+            Keys live in the macOS Keychain, and thinking models take the reasoning effort you
+            pick.
           </p>
         </div>
         <div className="flex flex-col gap-3">

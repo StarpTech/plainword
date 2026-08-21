@@ -14,6 +14,10 @@ import PlainwordCore
 /// therefore bounded by that assembly, and no element outlives the moment it described.
 final class LiveAccessibilityReader: AccessibilityReading {
     private let primaryScreenMaxY: CGFloat
+    /// Hit testing is asked of the application rather than of an element inside it: a
+    /// point is a place on screen, not a place in a subtree, and the application is the
+    /// smallest thing that can say what it drew anywhere within its own windows.
+    private let hitTestRoot: AXUIElement?
 
     private var elements: [ElementRef: AXUIElement] = [:]
     private var elementHandles: [AXElementKey: ElementRef] = [:]
@@ -23,9 +27,34 @@ final class LiveAccessibilityReader: AccessibilityReading {
 
     init(root: AXUIElement, primaryScreenMaxY: CGFloat) {
         self.primaryScreenMaxY = primaryScreenMaxY
+        // Taken from the element rather than passed in, so that every caller gets hit
+        // testing without having to know it was asking for it.
+        var processIdentifier: pid_t = 0
+        if AXUIElementGetPid(root, &processIdentifier) == .success, processIdentifier > 0 {
+            let application = AXUIElementCreateApplication(processIdentifier)
+            Self.applyHarvestTimeout(to: application)
+            hitTestRoot = application
+        } else {
+            hitTestRoot = nil
+        }
         rootReference = ElementRef(raw: 0)
         elements[rootReference] = root
         elementHandles[AXElementKey(root)] = rootReference
+        Self.applyHarvestTimeout(to: root)
+    }
+
+    /// Bounds what any one read here is allowed to cost.
+    ///
+    /// A timeout set on an element applies to that reference alone — not to its
+    /// children, and not to another reference that compares equal to it — so it has to
+    /// be applied to each element as it is discovered. That is the whole reason it can
+    /// be this tight: the references this reader interns are used for harvesting and
+    /// nothing else, and the ones the edit path holds keep the patient global value.
+    private static func applyHarvestTimeout(to element: AXUIElement) {
+        _ = AXUIElementSetMessagingTimeout(
+            element,
+            AccessibilityElementReader.harvestMessagingTimeout
+        )
     }
 
     let rootReference: ElementRef
@@ -39,6 +68,7 @@ final class LiveAccessibilityReader: AccessibilityReading {
         nextHandle += 1
         elements[reference] = element
         elementHandles[key] = reference
+        Self.applyHarvestTimeout(to: element)
         return reference
     }
 
@@ -134,6 +164,23 @@ final class LiveAccessibilityReader: AccessibilityReading {
         return AccessibilityElementReader.isAttributeSettable(name, on: target)
     }
 
+    func elementAtPosition(_ point: CGPoint) -> ElementRef? {
+        guard let hitTestRoot else { return nil }
+        var found: AXUIElement?
+        // The point arrives in AppKit coordinates, as every rectangle in this pipeline
+        // does. The Accessibility API measures downwards from the top of the primary
+        // display, which is the same flip the reader performs for rectangles.
+        guard AXUIElementCopyElementAtPosition(
+            hitTestRoot,
+            Float(point.x),
+            Float(primaryScreenMaxY - point.y),
+            &found
+        ) == .success, let found else {
+            return nil
+        }
+        return reference(for: found)
+    }
+
     func parameterizedAttributeNames(of element: ElementRef) -> Set<String> {
         guard let target = self.element(for: element) else { return [] }
         var names: CFArray?
@@ -200,6 +247,12 @@ final class LiveAccessibilityReader: AccessibilityReading {
                 var range = CFRange()
                 guard AXValueGetValue(axValue, .cfRange, &range) else { return nil }
                 return .textRange(location: range.location, length: range.length)
+            case .cgPoint:
+                var point = CGPoint.zero
+                guard AXValueGetValue(axValue, .cgPoint, &point) else { return nil }
+                return .point(
+                    CGPoint(x: point.x, y: primaryScreenMaxY - point.y)
+                )
             case .cgRect:
                 var rect = CGRect.zero
                 guard AXValueGetValue(axValue, .cgRect, &rect) else { return nil }
@@ -231,6 +284,11 @@ final class LiveAccessibilityReader: AccessibilityReading {
         case let .textRange(location, length):
             var range = CFRange(location: location, length: length)
             return AXValueCreate(.cfRange, &range)
+        case let .number(value):
+            return value as CFNumber
+        case let .point(point):
+            var flipped = CGPoint(x: point.x, y: primaryScreenMaxY - point.y)
+            return AXValueCreate(.cgPoint, &flipped)
         case let .rect(rect):
             // Rectangles arrive from the pipeline in AppKit coordinates and have to go
             // back the way they came. The conversion is its own inverse.

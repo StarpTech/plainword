@@ -32,7 +32,9 @@ public enum Tone: String, CaseIterable, Codable, Identifiable, Sendable {
         case .keepMine:
             """
             the author's own — match the tone of their existing writing, and never \
-            trade it for a smoother, warmer, or more neutral one
+            trade it for a smoother, warmer, or more neutral one. Keep their emoji, \
+            slang, abbreviations, and shorthand exactly as written; change one only \
+            when it is a spelling or grammar error rather than voice
             """
         default:
             rawValue

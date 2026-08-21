@@ -35,17 +35,24 @@ public final class FixtureAccessibilityReader: AccessibilityReading {
         reference(forNode: fixture.focusedNode)
     }
 
+    /// The writing site the recording was taken at.
+    ///
+    /// Everything defaults to what the recording itself says, so a replay asks the same
+    /// question the live harvest was asked. Passing a value overrides it, which is how a
+    /// test states the case it means to exercise.
     public func target(
-        targetKind: TextEditTargetKind = .sentence,
-        capturedText: String = "",
+        targetKind: TextEditTargetKind? = nil,
+        capturedText: String? = nil,
         targetRange: NSRange = NSRange(location: 0, length: 0)
     ) -> ContextTarget {
         ContextTarget(
             element: focusedElement,
             applicationName: fixture.application,
             bundleIdentifier: fixture.bundleIdentifier,
-            targetKind: targetKind,
-            capturedText: capturedText,
+            targetKind: targetKind
+                ?? fixture.targetKind.flatMap(TextEditTargetKind.init(rawValue:))
+                ?? .sentence,
+            capturedText: capturedText ?? fixture.capturedText ?? "",
             targetRange: targetRange
         )
     }
@@ -86,6 +93,7 @@ public final class FixtureAccessibilityReader: AccessibilityReading {
         case let .elements(ids): .elements(ids.map(reference(forNode:)))
         case let .rect(x, y, width, height):
             .rect(CGRect(x: x, y: y, width: width, height: height))
+        case let .point(x, y): .point(CGPoint(x: x, y: y))
         case let .textRange(location, length): .textRange(location: location, length: length)
         case let .marker(name): .opaque(reference(forMarker: name))
         case let .markers(names): .opaques(names.map(reference(forMarker:)))
@@ -160,5 +168,13 @@ public final class FixtureAccessibilityReader: AccessibilityReading {
     public func parameterizedAttributeNames(of element: ElementRef) -> Set<String> {
         readLog.append("parameterizedAttributeNames")
         return Set(node(for: element)?.parameterizedNames ?? [])
+    }
+
+    public func elementAtPosition(_ point: CGPoint) -> ElementRef? {
+        readLog.append("elementAtPosition")
+        guard let id = fixture.hitTests?[AXFixture.hitTestKey(for: point)] else {
+            return nil
+        }
+        return reference(forNode: id)
     }
 }

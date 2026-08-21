@@ -42,19 +42,45 @@ public struct AXFixture: Codable, Equatable, Sendable {
     public var scenario: String
     public var focusedNode: Int
     public var nodes: [Node]
+    /// What the application answered when asked what it had drawn at a point, keyed by
+    /// the point. Optional so that a recording made before hit testing existed still
+    /// replays — it simply has none to answer with.
+    public var hitTests: [String: Int]?
+    /// What the field held when the recording was taken, and what kind of request it was
+    /// taken for.
+    ///
+    /// Both are needed for a replay to mean anything. Without the text, a source cannot
+    /// tell where the author's own writing begins and hands it back as though the
+    /// interface had said it; without the kind, the replay measures itself against the
+    /// wrong allowance — a draft at an empty caret needs three times the prose an edit
+    /// does before it counts as answered.
+    public var capturedText: String?
+    public var targetKind: String?
 
     public init(
         application: String,
         bundleIdentifier: String? = nil,
         scenario: String,
         focusedNode: Int,
-        nodes: [Node]
+        nodes: [Node],
+        hitTests: [String: Int]? = nil,
+        capturedText: String? = nil,
+        targetKind: String? = nil
     ) {
         self.application = application
         self.bundleIdentifier = bundleIdentifier
         self.scenario = scenario
         self.focusedNode = focusedNode
         self.nodes = nodes
+        self.hitTests = hitTests
+        self.capturedText = capturedText
+        self.targetKind = targetKind
+    }
+
+    /// How a hit test is keyed in a recording. Rounded to whole points, which is finer
+    /// than any ladder steps and coarse enough to survive the round trip through JSON.
+    public static func hitTestKey(for point: CGPoint) -> String {
+        "\(Int(point.x.rounded())):\(Int(point.y.rounded()))"
     }
 
     /// How a parameterized read is keyed in a recording.
@@ -79,6 +105,13 @@ public struct AXFixture: Codable, Equatable, Sendable {
             return "string:\(value)"
         case let .textRange(location, length):
             return "range:\(location):\(length)"
+        case let .number(value):
+            return "number:\(value)"
+        case let .rect(rect):
+            return "rect:\(Int(rect.minX)):\(Int(rect.minY))"
+                + ":\(Int(rect.width)):\(Int(rect.height))"
+        case let .point(point):
+            return "point:\(Int(point.x)):\(Int(point.y))"
         default:
             return nil
         }
@@ -94,11 +127,16 @@ public enum FixtureValue: Codable, Equatable, Sendable {
     case element(Int)
     case elements([Int])
     case rect(x: Double, y: Double, width: Double, height: Double)
+    case point(x: Double, y: Double)
     case textRange(location: Int, length: Int)
     /// A text marker, named by whatever identity the recording gave it. Equal names mean
     /// the application considered the markers equal.
     case marker(String)
     case markers([String])
+
+    public static func point(_ point: CGPoint) -> FixtureValue {
+        .point(x: Double(point.x), y: Double(point.y))
+    }
 
     public static func rect(_ rect: CGRect) -> FixtureValue {
         .rect(
