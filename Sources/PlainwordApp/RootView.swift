@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct RootView: View {
@@ -34,6 +35,7 @@ struct RootView: View {
     @EnvironmentObject private var settings: SettingsStore
     @Environment(\.colorScheme) private var colorScheme
     @State private var selection: AppSection = .general
+    @State private var isHoveringIssueLink = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -87,15 +89,45 @@ struct RootView: View {
 
             Spacer(minLength: 16)
 
-            Text(versionLabel)
-                .font(PlainwordFont.mono(9.5))
-                .foregroundStyle(PlainwordTheme.textTertiary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
+            VStack(alignment: .leading, spacing: 7) {
+                reportIssueButton
+
+                Text(versionLabel)
+                    .font(PlainwordFont.mono(9.5))
+                    .foregroundStyle(PlainwordTheme.textTertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
         }
         .frame(width: 196)
         .background(PlainwordTheme.raisedSurface)
+    }
+
+    /// Deliberately quiet: this belongs beside the version number, as something to
+    /// reach for when the app misbehaves, not a fifth item competing with navigation.
+    private var reportIssueButton: some View {
+        Button {
+            NSWorkspace.shared.open(Self.issueURL)
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "exclamationmark.bubble")
+                    .font(.system(size: 10, weight: .medium))
+                Text("Report an issue")
+                    .font(PlainwordFont.ui(10.5))
+            }
+            .foregroundStyle(
+                isHoveringIssueLink
+                    ? PlainwordTheme.textSecondary
+                    : PlainwordTheme.textTertiary
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHoveringIssueLink = $0 }
+        .animation(PlainwordMotion.content, value: isHoveringIssueLink)
+        .help("Open a new issue on the Plainword repository")
+        .accessibilityHint("Opens GitHub in your browser")
     }
 
     private func sidebarButton(_ section: AppSection) -> some View {
@@ -161,6 +193,10 @@ struct RootView: View {
                 )
         }
     }
+
+    private static let issueURL = URL(
+        string: "https://github.com/StarpTech/plainword/issues/new"
+    )!
 
     private var versionLabel: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")

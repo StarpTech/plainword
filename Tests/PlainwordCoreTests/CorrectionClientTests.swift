@@ -134,6 +134,29 @@ final class ChatCompletionsClientTests: XCTestCase {
         XCTAssertEqual(json["reasoning_effort"] as? String, "minimal")
     }
 
+    func testSendsExtendedReasoningEffortsSupportedByNewerModels() throws {
+        for (mode, expected) in [(ThinkingMode.extraHigh, "xhigh"), (.max, "max")] {
+            let request = try ChatCompletionsClient().makeRequest(
+                text: "hello",
+                profile: WritingProfile(),
+                locale: "en-US",
+                settings: LLMSettings(
+                    endpoint: "https://example.com/v1/chat/completions",
+                    model: "gpt-5.6",
+                    authentication: .bearer,
+                    thinkingMode: mode
+                ),
+                apiKey: "test-key"
+            )
+
+            let body = try XCTUnwrap(request.httpBody)
+            let json = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: body) as? [String: Any]
+            )
+            XCTAssertEqual(json["reasoning_effort"] as? String, expected)
+        }
+    }
+
     func testBuildsOllamaRequestWithSelectedModelAndThinkingMode() throws {
         let request = try ChatCompletionsClient().makeRequest(
             text: "hello",

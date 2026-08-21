@@ -101,9 +101,6 @@ final class SettingsStore: ObservableObject {
 
     @Published var provider: LLMProvider {
         didSet {
-            if provider == .codex, thinkingMode == .off {
-                thinkingMode = .low
-            }
             persistLLMSettings()
             if provider == .codex {
                 Task { await loadCodexStatusIfNeeded() }
@@ -219,13 +216,7 @@ final class SettingsStore: ObservableObject {
         codexModel = storedSettings.codexModel
         authentication = storedSettings.authentication
         customHeaderName = storedSettings.customHeaderName
-        let normalizedThinkingMode: ThinkingMode
-        if storedSettings.provider == .codex, storedSettings.thinkingMode == .off {
-            normalizedThinkingMode = .low
-        } else {
-            normalizedThinkingMode = storedSettings.thinkingMode
-        }
-        thinkingMode = normalizedThinkingMode
+        thinkingMode = storedSettings.thinkingMode
         do {
             let storedKey = try apiKeyStore.read() ?? ""
             apiKey = storedKey
@@ -233,9 +224,6 @@ final class SettingsStore: ObservableObject {
         } catch {
             apiKey = ""
             credentialState = .failure(error.localizedDescription)
-        }
-        if normalizedThinkingMode != storedSettings.thinkingMode {
-            persistLLMSettings()
         }
         if provider == .codex {
             Task { [weak self] in

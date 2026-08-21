@@ -76,7 +76,7 @@ extension LLMDebugLogEntry {
     var transportSummary: String {
         var parts = [
             request.isStreaming ? "Streaming" : "Standard",
-            request.reasoningEffort.capitalized + " thinking"
+            Self.thinkingLabel(for: request.reasoningEffort)
         ]
         if let timeToFirstByteLabel {
             parts.append(timeToFirstByteLabel)
@@ -88,6 +88,14 @@ extension LLMDebugLogEntry {
             parts.append(tokenSummary)
         }
         return parts.joined(separator: " · ")
+    }
+
+    /// Reasoning efforts are wire values ("xhigh"), so prefer the mode's own label
+    /// and only fall back to the raw string for values the app does not model.
+    static func thinkingLabel(for reasoningEffort: String) -> String {
+        let name = ThinkingMode(rawValue: reasoningEffort)?.displayName
+            ?? reasoningEffort.capitalized
+        return name + " thinking"
     }
 
     var tokenSummary: String? {

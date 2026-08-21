@@ -162,6 +162,8 @@ public enum ThinkingMode: String, CaseIterable, Codable, Identifiable, Sendable 
     case low
     case medium
     case high
+    case extraHigh = "xhigh"
+    case max
 
     public var id: String { rawValue }
 
@@ -172,6 +174,8 @@ public enum ThinkingMode: String, CaseIterable, Codable, Identifiable, Sendable 
         case .low: "Low"
         case .medium: "Medium"
         case .high: "High"
+        case .extraHigh: "Extra high"
+        case .max: "Max"
         }
     }
 }

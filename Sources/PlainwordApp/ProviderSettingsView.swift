@@ -319,9 +319,7 @@ struct ProviderSettingsView: View {
     }
 
     private var availableThinkingModes: [ThinkingMode] {
-        settings.provider == .codex
-            ? ThinkingMode.allCases.filter { $0 != .off }
-            : ThinkingMode.allCases
+        ThinkingMode.allCases
     }
 
     private var codexModelDetail: String {

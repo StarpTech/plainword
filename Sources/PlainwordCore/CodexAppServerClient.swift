@@ -594,9 +594,9 @@ public actor CodexAppServerClient {
     }
 
     static func reasoningEffort(for thinkingMode: ThinkingMode) -> String {
-        // Codex models do not advertise a no-reasoning effort. Omitting the
-        // value would inherit the CLI configuration, which may be much higher.
-        thinkingMode == .off ? ThinkingMode.low.rawValue : thinkingMode.rawValue
+        // Always sent, never omitted: an absent effort inherits the CLI
+        // configuration, which may be much higher than the chosen mode.
+        thinkingMode.rawValue
     }
 
     private func performTurn(

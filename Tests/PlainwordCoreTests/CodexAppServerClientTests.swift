@@ -184,7 +184,7 @@ final class CodexAppServerClientTests: XCTestCase {
         )
     }
 
-    func testOffThinkingModeUsesLowEffortInsteadOfCLIConfiguration() {
+    func testOffThinkingModeSendsNoneEffortInsteadOfCLIConfiguration() {
         let turn = CodexAppServerClient.turnParameters(
             threadID: "thread-1",
             userPrompt: "Fix this.",
@@ -192,8 +192,22 @@ final class CodexAppServerClientTests: XCTestCase {
             thinkingMode: .off
         )
 
-        XCTAssertEqual(turn["effort"], .string("low"))
-        XCTAssertEqual(CodexAppServerClient.reasoningEffort(for: .off), "low")
+        XCTAssertEqual(turn["effort"], .string("none"))
+        XCTAssertEqual(CodexAppServerClient.reasoningEffort(for: .off), "none")
+    }
+
+    func testPassesExtendedReasoningEffortsThrough() {
+        XCTAssertEqual(CodexAppServerClient.reasoningEffort(for: .extraHigh), "xhigh")
+        XCTAssertEqual(CodexAppServerClient.reasoningEffort(for: .max), "max")
+        XCTAssertEqual(
+            CodexAppServerClient.turnParameters(
+                threadID: "thread-1",
+                userPrompt: "Fix this.",
+                intent: .correct,
+                thinkingMode: .extraHigh
+            )["effort"],
+            .string("xhigh")
+        )
     }
 
     func testIdentifiesLatencyOptimizedModel() {
