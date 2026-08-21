@@ -1,7 +1,7 @@
 /** Central place for copy, links and data used across sections. */
 
 export const DOWNLOAD_URL =
-  'https://github.com/StarpTech/plainword/releases/download/v1.0.0-beta.6/Plainword-1.0.0-beta.6-unsigned.dmg';
+  'https://github.com/StarpTech/plainword/releases/download/v1.0.0-beta.7/Plainword-1.0.0-beta.7-unsigned.dmg';
 export const GITHUB_URL = 'https://github.com/StarpTech/plainword';
 
 export const APP_CHIPS = ['macOS apps', 'Browser', 'WhatsApp', 'Slack', 'LinkedIn', 'and more'];
