@@ -109,10 +109,10 @@ export default function ContextSection() {
             title="Only what’s around your cursor."
           />
           <Reveal as="p" delay={80} className="mt-4 text-pretty text-ink-soft">
-            &ldquo;Sure, I&rsquo;ll have it over by Friday&rdquo; means nothing on its own &mdash;
+            &ldquo;Sure, I&rsquo;ll have it over by Friday&rdquo; means nothing on its own.
             Plainword has to see what you&rsquo;re answering. So it reads the box you&rsquo;re
             writing in and the text just above it, inside that one window. Not the rest of your
-            screen, not your other apps &mdash; and every suggestion lists what it used.
+            screen, not your other apps. And every suggestion lists what it used.
           </Reveal>
           <Reveal
             delay={140}

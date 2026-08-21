@@ -22,7 +22,7 @@ export default function DownloadCta() {
             Your style, your context, your model.
           </h2>
           <p className="mx-auto mb-9 text-md text-ink-soft">
-            Free and open source. macOS 14 or newer.
+            The free alternative to Grammarly. Open source, macOS 14 or newer.
           </p>
           <div className="mx-auto flex w-full max-w-[320px] flex-col items-stretch gap-3 sm:max-w-none sm:flex-row sm:items-center sm:justify-center">
             <Button href={DOWNLOAD_URL} size="lg" className="w-full sm:w-auto">

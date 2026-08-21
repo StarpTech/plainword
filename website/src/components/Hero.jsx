@@ -28,8 +28,8 @@ export default function Hero() {
 
         <Reveal delay={120}>
           <p className="relative z-10 mx-auto mb-9 max-w-[560px] text-lead text-pretty text-ink-soft">
-            Fix, rewrite or draft text right where you type it — in your tone, on your model, with
-            the conversation around your cursor for context.
+            Fix, rewrite or draft text right where you type it, in your own tone and style,
+            on the model you choose. The free alternative to Grammarly.
           </p>
         </Reveal>
 
@@ -43,7 +43,9 @@ export default function Hero() {
               GitHub
             </Button>
           </div>
-          <p className="mt-4 font-mono text-[11px] text-ink-faint">Free · macOS 14 or newer</p>
+          <p className="mt-4 font-mono text-[11px] text-ink-faint">
+            Free · no account · macOS 14 or newer
+          </p>
 
           <div className="mt-7 inline-flex flex-wrap items-center justify-center gap-2 text-sm text-ink-soft">
             <kbd className="rounded-control border border-line-strong bg-surface px-2 py-1 font-mono text-xs whitespace-nowrap text-ink shadow-paper">

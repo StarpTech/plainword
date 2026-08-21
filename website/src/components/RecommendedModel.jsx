@@ -93,7 +93,7 @@ export default function RecommendedModel() {
         align="center"
         eyebrow="Recommended"
         title="Two models worth starting with."
-        lead="Any OpenAI-compatible model works. These two cover the real choice: keep it on the machine, or get the smarter answer."
+        lead="These two cover the real choice: keep everything on your Mac for free, or spend pennies a month on the smarter answer. Any OpenAI-compatible model works."
       />
       <div className="mt-12 grid gap-5 md:grid-cols-2">
         {RECOMMENDED_MODELS.map((model, i) => (

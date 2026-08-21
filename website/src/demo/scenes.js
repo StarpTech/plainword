@@ -29,7 +29,7 @@ export const SCENES = [
         ['To:', 'Dana Whitfield'],
         ['Subject:', 'Re: Q3 report'],
       ],
-      before: ['Hi Dana — thanks for the notes, I folded most of them in this afternoon.'],
+      before: ['Hi Dana, thanks for the notes, I folded most of them in this afternoon.'],
       after: ['Best,', 'Sam'],
     },
     field: {
@@ -65,7 +65,7 @@ export const SCENES = [
         ['Title', 'Re: Q3 report'],
         [
           'Around your text',
-          'Hi Dana — thanks for the notes, I folded most of them in this afternoon. … Best, Sam',
+          'Hi Dana, thanks for the notes, I folded most of them in this afternoon. … Best, Sam',
         ],
       ],
     },
@@ -109,13 +109,13 @@ export const SCENES = [
     },
     prompt: 'friendlier, and half as long',
     result:
-      'Heads up — the deploy moved to Thursday. Could you clear your open review comments before then?',
+      'Heads up, the deploy moved to Thursday. Could you clear your open review comments before then?',
     segs: [
       [
         'r',
         'Per my previous message, the deployment window has been moved to',
       ],
-      ['i', 'Heads up — the deploy moved to'],
+      ['i', 'Heads up, the deploy moved to'],
       ['u', ' Thursday'],
       ['r', ' and all outstanding review comments must be resolved prior to that date.'],
       ['i', '. Could you clear your open review comments before then?'],
@@ -155,7 +155,7 @@ export const SCENES = [
     shortcut: ['⇧⌘', 'F2'],
     kicker: 'Write something',
     blurb:
-      'An empty field has nothing to correct, so it writes the reply — from your one-line note and the message above.',
+      'An empty field has nothing to correct, so it writes the reply from your one-line note and the message above.',
     app: 'browser',
     pointer: 'bottom',
     flow: 'compose',
@@ -167,7 +167,7 @@ export const SCENES = [
           initials: 'RS',
           name: 'Rina Solá',
           time: 'Mon',
-          text: 'Hi Sam — I came across Plainword last week and read the whole accessibility write-up. Lovely work.',
+          text: 'Hi Sam, I came across Plainword last week and read the whole accessibility write-up. Lovely work.',
         },
         {
           initials: 'RS',
@@ -181,7 +181,7 @@ export const SCENES = [
     field: { text: '', empty: true },
     prompt: 'thanks, happy where I am, stay in touch',
     result:
-      'Thank you, Rina — that’s kind of you to say. I’m happy where I am right now, so I’ll pass on the call, but I’d be glad to stay in touch in case that changes.',
+      'Thank you, Rina. That’s kind of you to say. I’m happy where I am right now, so I’ll pass on the call, but I’d be glad to stay in touch in case that changes.',
     prompting: {
       title: 'Write something',
       caption: 'What should Plainword write?',

@@ -7,22 +7,22 @@ const FEATURES = [
   {
     glyph: '✎\uFE0E',
     title: 'Writes in your tone and style',
-    text: 'Keep your own voice, or ask for friendly or professional. Standing instructions ride along with every request.',
+    text: 'Keep your own voice, or ask for friendly or professional. Tell it once, like “no semicolons, British English”, and it holds to that everywhere.',
   },
   {
     glyph: '❝\uFE0E',
-    title: 'Uses the text around your cursor',
+    title: 'Reads the room, not just the line',
     text: 'A reply in a thread gets edited as a reply, not as an isolated sentence.',
   },
   {
     glyph: '⌘\uFE0E',
-    title: 'Answers to two shortcuts',
-    text: '⌘F2 reviews what you wrote. ⇧⌘F2 takes an instruction — shorter, friendlier, in German. Rebind either one.',
+    title: 'Two shortcuts, everywhere you type',
+    text: '⌘F2 reviews what you wrote. ⇧⌘F2 takes an instruction: shorter, friendlier, in German. Rebind either one.',
   },
   {
     glyph: '⌕\uFE0E',
     title: 'Shows what it read',
-    text: 'Every suggestion carries a receipt of the surrounding text it used — and a switch to leave that context out.',
+    text: 'Every suggestion lists the surrounding text it used, with a switch to leave that out.',
   },
   {
     glyph: '⊘\uFE0E',
@@ -31,8 +31,8 @@ const FEATURES = [
   },
   {
     glyph: '⌁\uFE0E',
-    title: 'Runs on any LLM',
-    text: 'Ollama on your Mac, your Codex login, or any OpenAI-compatible key — with reasoning effort you set yourself.',
+    title: 'Runs on your model, not ours',
+    text: 'Free and offline on your own Mac with Ollama, your existing Codex login, or any API key you already pay for.',
   },
 ];
 
@@ -97,7 +97,7 @@ function MenuBarCard() {
         <p className="pw-label mb-3">In the menu bar</p>
         <h3 className="text-h3">A lowercase p and a green full stop.</h3>
         <p className="mt-3 max-w-[420px] text-sm text-pretty text-ink-soft">
-          No window in the way — just a stop that turns amber while a request is running, and
+          No window in the way. Just a stop that turns amber while a request is running, and
           disappears while suggestions are paused. Turn off <em>Show in Dock</em> and the menu
           bar is all that is left of it.
         </p>

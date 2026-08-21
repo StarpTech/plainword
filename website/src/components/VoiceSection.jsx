@@ -122,7 +122,7 @@ export default function VoiceSection() {
           <SectionHeading
             eyebrow="Your voice"
             title="Teach it how you write."
-            lead="Set it once. Standing instructions ride along with every request, so you stop making the same correction."
+            lead="Set it once and stop making the same correction. Every suggestion comes back sounding like you, not like a style guide."
           />
           <Reveal as="dl" delay={80} className="mt-8 flex flex-col gap-0">
             {VOICE_ROWS.map((row) => (

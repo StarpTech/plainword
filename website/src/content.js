@@ -9,7 +9,7 @@ export const APP_CHIPS = ['macOS apps', 'Browser', 'WhatsApp', 'Slack', 'LinkedI
 export const VOICE_ROWS = [
   { label: 'Tone', text: 'Keep mine, friendly or professional.' },
   { label: 'Style', text: 'Keep mine, concise or detailed.' },
-  { label: 'Language', text: 'Whatever you wrote in \u2014 or pin one.' },
+  { label: 'Language', text: 'Whatever you wrote in, or pin one.' },
   { label: 'Instructions', text: '\u201CBritish English, no semicolons.\u201D' },
 ];
 
@@ -47,7 +47,7 @@ export const RECOMMENDED_MODELS = [
     eyebrow: 'If nothing may leave the Mac',
     name: 'Gemma 4 E2B',
     via: 'Ollama',
-    text: 'Open weights, running on your own hardware. Good at phrasing, at replies, and at the language you wrote in \u2014 which is most of the job.',
+    text: 'Open weights, running on your own hardware. Good at phrasing, at replies, and at the language you wrote in, which is most of the job.',
     points: [
       'Under 0.5s to a suggestion',
       'No account, no API key, works offline',
