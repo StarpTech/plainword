@@ -57,6 +57,11 @@ extension LLMDebugLogEntry {
         return false
     }
 
+    var isInProgress: Bool {
+        if case .inProgress = state { return true }
+        return false
+    }
+
     var failureMessage: String? {
         if case .failed(_, let message) = state { return message }
         return nil
@@ -72,24 +77,6 @@ extension LLMDebugLogEntry {
         timeToFirstByte.map { String(format: "TTFB %.2f s", $0) }
     }
 
-    /// The short line under the model name: how the call was made and how long it took.
-    var transportSummary: String {
-        var parts = [
-            request.isStreaming ? "Streaming" : "Standard",
-            Self.thinkingLabel(for: request.reasoningEffort)
-        ]
-        if let timeToFirstByteLabel {
-            parts.append(timeToFirstByteLabel)
-        }
-        if let durationLabel {
-            parts.append(durationLabel)
-        }
-        if let tokenSummary {
-            parts.append(tokenSummary)
-        }
-        return parts.joined(separator: " · ")
-    }
-
     /// Reasoning efforts are wire values ("xhigh"), so prefer the mode's own label
     /// and only fall back to the raw string for values the app does not model.
     static func thinkingLabel(for reasoningEffort: String) -> String {
@@ -98,17 +85,7 @@ extension LLMDebugLogEntry {
         return name + " thinking"
     }
 
-    var tokenSummary: String? {
-        guard let usage = tokenUsage else { return nil }
-        var parts: [String] = []
-        if let inputTokens = usage.inputTokens {
-            parts.append("\(inputTokens.formatted()) in")
-        }
-        if let outputTokens = usage.outputTokens {
-            parts.append("\(outputTokens.formatted()) out")
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
+    var tokenSummary: String? { tokenUsage?.compactDescription }
 
     /// What the author asked for, read from the prompt's own delimiters.
     var taskLabel: String? {
@@ -187,24 +164,33 @@ extension LLMDebugLogEntry {
 }
 
 extension LLMTokenUsage {
-    var totalDescription: String {
+    /// What the call spent, in the fewest words that still say which way each figure
+    /// runs. `nil` when the provider reported nothing, so the inspector can print one
+    /// dash instead of spelling out "Not reported" in every column.
+    var compactDescription: String? {
         var parts: [String] = []
         if let inputTokens {
-            parts.append("\(inputTokens.formatted()) input")
+            parts.append("\(inputTokens.formatted()) in")
         }
         if let outputTokens {
-            parts.append("\(outputTokens.formatted()) output")
+            parts.append("\(outputTokens.formatted()) out")
         }
-        if let totalTokens {
+        // A provider that reports only a total still has something worth showing.
+        if parts.isEmpty, let totalTokens {
             parts.append("\(totalTokens.formatted()) total")
         }
-        return parts.isEmpty ? "Not reported" : parts.joined(separator: " · ")
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    var cacheDescription: String {
-        let reads = cacheReadTokens.map { $0.formatted() } ?? "Not reported"
-        let writes = cacheWriteTokens.map { $0.formatted() } ?? "Not reported"
-        return "\(reads) read · \(writes) written"
+    var compactCacheDescription: String? {
+        var parts: [String] = []
+        if let cacheReadTokens {
+            parts.append("\(cacheReadTokens.formatted()) read")
+        }
+        if let cacheWriteTokens {
+            parts.append("\(cacheWriteTokens.formatted()) written")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
 

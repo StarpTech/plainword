@@ -10,7 +10,7 @@ export const VOICE_ROWS = [
   { label: 'Tone', text: 'Keep mine, friendly or professional.' },
   { label: 'Style', text: 'Keep mine, concise or detailed.' },
   { label: 'Language', text: 'Whatever you wrote in, or pin one.' },
-  { label: 'Instructions', text: '\u201CBritish English, no semicolons.\u201D' },
+  { label: 'Instructions', text: '\u201CBritish English, no semicolons, no em dashes.\u201D' },
 ];
 
 export const CONTEXT_NEVER = [

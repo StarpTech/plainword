@@ -105,7 +105,7 @@ function WritingSettings() {
           <textarea
             rows={3}
             aria-label="Additional instructions"
-            defaultValue="Prefer British English. No semicolons. Never open with “I hope this finds you well”."
+            defaultValue="Prefer British English. No semicolons. Avoid unnatural writing style like “—”."
             className="resize-y rounded-[9px] border border-line-strong bg-field p-2.5 font-serif text-[13.5px] leading-[1.5] text-ink outline-none focus:border-accent"
           />
         </div>

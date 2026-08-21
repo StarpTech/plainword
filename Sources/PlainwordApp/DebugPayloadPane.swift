@@ -46,16 +46,22 @@ struct DebugPayloadTextView: NSViewRepresentable {
 }
 
 /// A titled payload with its size, a copy action, and a scrolling body.
+///
+/// `height` is `nil` when the pane is the only payload on screen, which is the case in
+/// the call inspector: one payload at a time, given every point the sheet has left,
+/// rather than a column of stubs that each need their own scroll.
 struct DebugPayloadPane: View {
     let title: String
     let text: String
-    var maxHeight: CGFloat = 220
+    var height: CGFloat?
+    var emptyMessage = "Nothing was recorded for this section."
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Text(title)
                     .font(PlainwordFont.ui(12, weight: .bold))
+                    .lineLimit(1)
                 Text(sizeLabel)
                     .font(PlainwordFont.mono(10))
                     .foregroundStyle(PlainwordTheme.textSecondary)
@@ -70,14 +76,16 @@ struct DebugPayloadPane: View {
                 .frame(height: 1)
 
             if text.isEmpty {
-                Text("Nothing was recorded for this section.")
+                Text(emptyMessage)
                     .font(PlainwordFont.ui(11))
                     .foregroundStyle(PlainwordTheme.textSecondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, maxHeight: height == nil ? .infinity : nil)
                     .padding(.vertical, 22)
             } else {
                 DebugPayloadTextView(text: text, accessibilityLabel: title)
-                    .frame(height: maxHeight)
+                    .frame(height: height, alignment: .topLeading)
+                    .frame(maxHeight: height == nil ? .infinity : nil)
             }
         }
         .plainwordCard(cornerRadius: 10, fill: PlainwordTheme.raisedSurface)
