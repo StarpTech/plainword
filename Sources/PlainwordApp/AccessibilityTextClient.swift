@@ -119,6 +119,10 @@ final class AccessibilityTextClient {
     /// ellipsis a drawn prompt carries where the accessible name leaves it off.
     private let placeholderEchoSlack = 5
     private let domClassListAttribute = "AXDOMClassList"
+    /// How far back a caret's own line is followed when a host cannot report where that
+    /// line begins. Long enough to be unique inside a paragraph, and read only for a
+    /// caret that already looks misplaced.
+    private let maximumCaretMarkerSteps = 48
     /// Classes a rich-text editor puts on an empty document while it draws its prompt.
     /// Each one is that editor's own statement that the field holds nothing.
     private let emptyEditorClassNames: Set<String> = [
@@ -141,6 +145,35 @@ final class AccessibilityTextClient {
         let range: NSRange
         let documentUTF16Length: Int
         let selectedRange: CFRange
+        /// Where the caret sits in the captured text, once the source's own answer has
+        /// been reconciled with the text it handed over. The same number as
+        /// `selectedRange.location` in every host that reports the two consistently,
+        /// which is every host that is not drawing web content.
+        let caretLocation: Int
+
+        init(
+            text: String,
+            range: NSRange,
+            documentUTF16Length: Int,
+            selectedRange: CFRange,
+            caretLocation: Int? = nil
+        ) {
+            self.text = text
+            self.range = range
+            self.documentUTF16Length = documentUTF16Length
+            self.selectedRange = selectedRange
+            self.caretLocation = caretLocation ?? selectedRange.location
+        }
+
+        func withCaret(_ caretLocation: Int) -> CapturedTextState {
+            CapturedTextState(
+                text: text,
+                range: range,
+                documentUTF16Length: documentUTF16Length,
+                selectedRange: selectedRange,
+                caretLocation: caretLocation
+            )
+        }
     }
 
     private let contextService = ContextService()
@@ -213,7 +246,7 @@ final class AccessibilityTextClient {
         let selectedRange = textState.selectedRange
         let fullText = textState.text
         let localSelectedRange = NSRange(
-            location: selectedRange.location - textState.range.location,
+            location: textState.caretLocation - textState.range.location,
             length: selectedRange.length
         )
         guard localSelectedRange.location >= 0,
@@ -259,7 +292,10 @@ final class AccessibilityTextClient {
             selectedRange: selectedRange,
             context: context,
             anchor: anchorRect(
-                for: NSRange(location: selectedRange.location, length: selectedRange.length),
+                for: NSRange(
+                    location: textState.caretLocation,
+                    length: selectedRange.length
+                ),
                 textLength: textState.documentUTF16Length,
                 in: element
             )
@@ -289,7 +325,7 @@ final class AccessibilityTextClient {
               textState.selectedRange.length == 0,
               let context = TextEditContextExtractor.insertionPoint(
                 in: textState.text,
-                at: textState.selectedRange.location
+                at: textState.caretLocation
               ) else {
             logger.debug(
                 """
@@ -321,7 +357,7 @@ final class AccessibilityTextClient {
             ),
             anchor: anchorRect(
                 for: NSRange(
-                    location: textState.selectedRange.location,
+                    location: textState.caretLocation,
                     length: textState.selectedRange.length
                 ),
                 textLength: textState.documentUTF16Length,
@@ -600,7 +636,113 @@ final class AccessibilityTextClient {
         documentLength(of: element) == state.documentUTF16Length else {
             return nil
         }
-        return state
+        return state.withCaret(realignedCaretLocation(for: state, in: element))
+    }
+
+    /// Where the caret is, once the source's own answer has been reconciled with the
+    /// text it handed over.
+    ///
+    /// A caret resting at the end of a paragraph and one resting at the start of the
+    /// next are the same place on screen, and Chromium publishes the second spelling for
+    /// both: ask a `contenteditable` where its collapsed selection is while the author is
+    /// typing at the end of a line, and the offset that comes back begins the line below.
+    /// Everything downstream then agrees on the wrong paragraph, so a review of "the
+    /// paragraph at the cursor" proposes a rewrite of the signature under the letter.
+    ///
+    /// The offset cannot settle it, because both positions are the same number. The
+    /// writing immediately before the caret can, and the text-marker API reports that
+    /// separately — a marker is a position in a document rather than a number, so the two
+    /// are different markers even where they are the same offset.
+    private func realignedCaretLocation(
+        for state: CapturedTextState,
+        in element: AXUIElement
+    ) -> Int {
+        let reported = state.selectedRange.location
+        guard state.selectedRange.length == 0 else { return reported }
+
+        // Only a caret a source placed at the start of a line can be the downstream
+        // spelling of one resting at the end of the line above, so nowhere else is worth
+        // the marker round trips.
+        let local = reported - state.range.location
+        guard CaretAlignment.isAtLineStart(local, in: state.text),
+              let lineBeforeCaret = lineBeforeCaret(in: element) else {
+            return reported
+        }
+
+        let resolved = CaretAlignment.resolved(
+            reported: local,
+            lineBeforeCaret: lineBeforeCaret,
+            in: state.text
+        )
+        if resolved != local {
+            logger.debug(
+                """
+                Caret realigned from \(reported, privacy: .public) to \
+                \(resolved + state.range.location, privacy: .public), against a line of \
+                \((lineBeforeCaret as NSString).length, privacy: .public) characters
+                """
+            )
+        }
+        return resolved + state.range.location
+    }
+
+    /// The writing between the start of the caret's line and the caret itself, as the
+    /// text-marker API reports it.
+    ///
+    /// Empty when the caret really is at the start of a line, which is what makes this an
+    /// answer rather than a guess. Absent in every host that publishes no markers —
+    /// native controls report their offsets consistently and never come here.
+    ///
+    /// It does not matter whether a host reads "previous line start" as the start of the
+    /// caret's own line or of the one before it. The probe is trimmed to the caret's line
+    /// either way, and one that overran is only a longer match.
+    private func lineBeforeCaret(in element: AXUIElement) -> String? {
+        guard let selection = attributeValue("AXSelectedTextMarkerRange", from: element),
+              let caret = parameterizedAttributeValue(
+                "AXStartTextMarkerForTextMarkerRange",
+                parameter: selection,
+                from: element
+              ),
+              let lineStart = parameterizedAttributeValue(
+                "AXPreviousLineStartTextMarkerForTextMarker",
+                parameter: caret,
+                from: element
+              ) ?? markerSteppedBack(from: caret, in: element),
+              let lineRange = parameterizedAttributeValue(
+                "AXTextMarkerRangeForUnorderedTextMarkers",
+                parameter: [lineStart, caret] as CFArray,
+                from: element
+              ),
+              let line = parameterizedAttributeValue(
+                "AXStringForTextMarkerRange",
+                parameter: lineRange,
+                from: element
+              ) else {
+            return nil
+        }
+        return (line as? String) ?? (line as? NSAttributedString)?.string
+    }
+
+    /// A bounded walk back through single markers, for a host that publishes markers but
+    /// will not say where a line begins.
+    private func markerSteppedBack(
+        from caret: CFTypeRef,
+        in element: AXUIElement
+    ) -> CFTypeRef? {
+        var marker = caret
+        var stepped: CFTypeRef?
+        for _ in 0..<maximumCaretMarkerSteps {
+            guard let previous = parameterizedAttributeValue(
+                "AXPreviousTextMarkerForTextMarker",
+                parameter: marker,
+                from: element
+            ) else {
+                break
+            }
+            marker = previous
+            stepped = previous
+        }
+        return stepped
     }
 
     private func maximumTargetLength(
