@@ -80,6 +80,9 @@ enum AccessibilityTextError: LocalizedError {
     case fieldChanged
     case fieldIsNotWritable
     case replacementFailed
+    /// The application reads its own text at one set of offsets and takes selections at
+    /// another, so no number Plainword has means what it needs to mean.
+    case offsetsDisagree
 
     var errorDescription: String? {
         switch self {
@@ -91,6 +94,8 @@ enum AccessibilityTextError: LocalizedError {
             "This application does not expose a writable text field."
         case .replacementFailed:
             "The application did not accept the replacement."
+        case .offsetsDisagree:
+            "This application did not agree on where its own text is, so nothing was changed."
         }
     }
 }
@@ -101,6 +106,10 @@ final class AccessibilityTextClient {
         case leading
         case trailing
     }
+
+    /// Told about every apply, so the debug view can show what was written where. Set
+    /// by whoever owns the log; nothing is recorded when nobody is listening.
+    var applyReceiptHandler: ((TextApplyReceipt) -> Void)?
 
     private let maximumAutomaticContextLength = 800
     private let maximumSelectionLength = 1_600
@@ -123,6 +132,11 @@ final class AccessibilityTextClient {
     /// line begins. Long enough to be unique inside a paragraph, and read only for a
     /// caret that already looks misplaced.
     private let maximumCaretMarkerSteps = 48
+    /// How far either side of the target a host is looked through for the target itself,
+    /// when the host and the plan disagree about where it is. Wide enough to cover the
+    /// drift an editor accumulates over a message, bounded because a search that has to
+    /// read the whole document to find a paragraph has not found it.
+    private let maximumOffsetSearchRadius = 400
     /// Classes a rich-text editor puts on an empty document while it draws its prompt.
     /// Each one is that editor's own statement that the field holds nothing.
     private let emptyEditorClassNames: Set<String> = [
@@ -819,14 +833,6 @@ final class AccessibilityTextClient {
         return frame
     }
 
-    func isUnchanged(_ snapshot: FocusedTextSnapshot) -> Bool {
-        snapshotState(snapshot) == .unchanged
-    }
-
-    func sourceTextIsUnchanged(_ snapshot: FocusedTextSnapshot) -> Bool {
-        capturedSourceIsUnchanged(snapshot)
-    }
-
     /// Reconnects a proposal to a focused text element that an application recreated
     /// while it was inactive. Native controls can invalidate their AX element on app
     /// deactivation even though the document, selection, and source text did not change.
@@ -914,6 +920,13 @@ final class AccessibilityTextClient {
         }
     }
 
+    /// Writes a suggestion into the application, and records what it took.
+    ///
+    /// The work is done by `applyPlan`; this is here to see that every way out of it
+    /// leaves a receipt behind, including the ways that throw. An apply that damages a
+    /// document is the failure this system can least afford, and until there was a
+    /// record of how each one was carried out, a report of damage could only be answered
+    /// by reading the source and guessing which path had run.
     func replace(_ snapshot: FocusedTextSnapshot, with correctedText: String) async throws {
         guard isTrusted else { throw AccessibilityTextError.permissionRequired }
         // Clicking a non-activating proposal panel can still make Chromium briefly
@@ -924,42 +937,148 @@ final class AccessibilityTextClient {
             throw AccessibilityTextError.fieldChanged
         }
 
-        guard let localContext = snapshot.context.translated(
-            byUTF16Offset: -snapshot.capturedTextRange.location
+        // The plan also settles whether the target is still where the snapshot says it
+        // is, which is the question the translation used to be here to ask.
+        guard let measuredPlan = TextReplacementPlanner.plan(
+            capturedText: snapshot.fullText,
+            capturedLocation: snapshot.capturedTextRange.location,
+            targetLocation: snapshot.context.utf16Location,
+            targetText: snapshot.context.text,
+            replacement: correctedText
         ) else {
             throw AccessibilityTextError.fieldChanged
         }
-        guard let updatedText = TextEditContextExtractor.replacing(
-                context: localContext,
-                in: snapshot.fullText,
-                with: correctedText
-        ) else {
-            throw AccessibilityTextError.fieldChanged
-        }
-        let replacementDelta = (correctedText as NSString).length
-            - snapshot.context.utf16Length
-        let updatedCapturedRange = NSRange(
-            location: snapshot.capturedTextRange.location,
-            length: snapshot.capturedTextRange.length + replacementDelta
-        )
 
-        // Browser-backed editors frequently implement range replacement even when a
-        // whole-value write reports success without updating the DOM. Prefer the
-        // standard selected-text attributes so the edit also preserves content outside
-        // the captured sentence (and any rich-text structure owned by the editor).
-        if try await replaceSelectedText(
-            in: snapshot.element,
-            range: snapshot.context.range,
-            originalText: snapshot.context.text,
-            with: correctedText,
-            expectedText: updatedText,
-            expectedRange: updatedCapturedRange
-        ) {
+        // Everything from here on is arithmetic done against a copy of the text, handed
+        // to the host as offsets. This is where the host is asked, once, whether those
+        // offsets mean to it what they mean here.
+        var offsetDelta = 0
+        if let disagreement = targetDisagreement(snapshot) {
+            // The host reads different writing at these offsets than the plan measured
+            // there. Sometimes that is a distance rather than a disagreement, and a
+            // distance can be measured and written off.
+            guard let delta = hostOffsetDelta(for: snapshot),
+                  delta != 0,
+                  hostHolds(
+                    snapshot.context.text,
+                    in: NSRange(
+                        location: snapshot.context.range.location + delta,
+                        length: snapshot.context.range.length
+                    ),
+                    of: snapshot.element
+                  ) else {
+                record(
+                    receiptFor: measuredPlan,
+                    snapshot: snapshot,
+                    startedAt: Date(),
+                    outcome: .failed("offsets disagree: " + disagreement)
+                )
+                throw AccessibilityTextError.offsetsDisagree
+            }
+            logger.debug(
+                """
+                Host offsets realigned by \(delta, privacy: .public) after \
+                \(disagreement, privacy: .public)
+                """
+            )
+            offsetDelta = delta
+        }
+        let plan = measuredPlan.shifted(by: offsetDelta)
+
+        let startedAt = Date()
+        let outcome: TextApplyReceipt.Outcome
+        do {
+            outcome = try await applyPlan(
+                plan,
+                for: snapshot,
+                correctedText: correctedText,
+                offsetDelta: offsetDelta
+            )
+        } catch {
+            record(
+                receiptFor: plan,
+                snapshot: snapshot,
+                startedAt: startedAt,
+                outcome: .failed(error.localizedDescription)
+            )
+            throw error
+        }
+
+        record(
+            receiptFor: plan,
+            snapshot: snapshot,
+            startedAt: startedAt,
+            outcome: outcome
+        )
+        switch outcome {
+        case .applied, .unchanged:
+            return
+        case .restored, .partiallyApplied, .unverified, .failed:
+            throw AccessibilityTextError.replacementFailed
+        }
+    }
+
+    private func applyPlan(
+        _ plan: TextReplacementPlan,
+        for snapshot: FocusedTextSnapshot,
+        correctedText: String,
+        offsetDelta: Int
+    ) async throws -> TextApplyReceipt.Outcome {
+        let caretDestination = snapshot.context.utf16Location
+            + offsetDelta
+            + (correctedText as NSString).length
+
+        // Every write is decided before any of them is attempted: what to select, what
+        // it should be holding, and what the field should read as afterwards. The plan
+        // covers only what the correction changed, and divides that at line breaks
+        // wherever it can, because a write carries plain characters and rebuilds the
+        // formatting of everything it lands on.
+        switch try await TextReplacementRunner.run(plan, perform: { write in
+            try await replaceSelectedText(write, in: snapshot.element)
+        }) {
+        case .applied:
+            moveCaret(in: snapshot.element, to: caretDestination)
+            return .applied(plan.writes.count > 1 ? .perLine : .span)
+        case .nothingToWrite:
+            // The field already reads as the correction does, down to a difference in
+            // how a character is spelled in Unicode. Rewriting it would cost the
+            // formatting of everything it covered to change nothing anyone can see.
             moveCaret(
                 in: snapshot.element,
-                to: snapshot.context.utf16Location + (correctedText as NSString).length
+                to: snapshot.context.utf16Location
+                    + offsetDelta
+                    + snapshot.context.utf16Length
             )
-            return
+            return .unchanged
+        case .refused:
+            // The field holds what it held before, so the strategies below are still
+            // free to try. Whatever landed before the refusal has been put back.
+            break
+        case let .partiallyApplied(landed, restored):
+            // Part of the correction is in the field and would not come back out. Every
+            // remaining strategy would write against text that has moved, so this is
+            // where it stops.
+            return .partiallyApplied(landedWrites: landed, restoredWrites: restored)
+        case let .unverified(landed):
+            // A write was attempted and the field then read as neither state. Nothing
+            // here knows what the document is holding, and the one thing that must not
+            // happen next is another write into it.
+            return .unverified(landedWrites: landed)
+        }
+
+        // Some hosts take a whole-span write where they would not take the writes above,
+        // so the correction is offered once more in one piece. Still narrowed: it
+        // reaches no further than the correction did.
+        if let spanWrite = plan.spanWrite, plan.writes != [spanWrite] {
+            switch try await replaceSelectedText(spanWrite, in: snapshot.element) {
+            case .applied:
+                moveCaret(in: snapshot.element, to: caretDestination)
+                return .applied(.span)
+            case .unverified:
+                return .unverified(landedWrites: 0)
+            case .refused:
+                break
+            }
         }
 
         // Selecting the range is itself an observable state change. Some browser-backed
@@ -975,25 +1094,30 @@ final class AccessibilityTextClient {
 
         let capturedCompleteField = snapshot.capturedTextRange.location == 0
             && snapshot.capturedTextRange.length == snapshot.documentUTF16Length
+        // Writing the whole value replaces the document with plain characters, which is
+        // exactly right for a text field and ruinous for a web editor: a mail composer
+        // handed its own words back loses every link, image, font, and block it was
+        // holding them in, including the ones in a signature the correction never
+        // touched. There is no way to write a value and keep them, so a rich document is
+        // left for the keyboard path, which edits in place.
         if capturedCompleteField,
+           offsetDelta == 0,
+           !isInsideWebArea(snapshot.element),
            isAttributeSettable(kAXValueAttribute, on: snapshot.element) {
             let valueResult = AXUIElementSetAttributeValue(
                 snapshot.element,
                 kAXValueAttribute as CFString,
-                updatedText as CFString
+                plan.updatedCapturedText as CFString
             )
             if valueResult == .success,
                try await waitForCapturedText(
-                updatedText,
-                range: updatedCapturedRange,
+                plan.updatedCapturedText,
+                range: plan.updatedCapturedRange,
                 in: snapshot.element,
                 attempts: 8
                ) {
-                moveCaret(
-                    in: snapshot.element,
-                    to: snapshot.context.utf16Location + (correctedText as NSString).length
-                )
-                return
+                moveCaret(in: snapshot.element, to: caretDestination)
+                return .applied(.wholeValue)
             }
 
             guard capturedSourceIsUnchanged(snapshot) else {
@@ -1002,17 +1126,10 @@ final class AccessibilityTextClient {
             restoreSelection(snapshot.selectedRange, in: snapshot.element)
         }
 
-        if try await replaceWithKeyboardInput(
-            snapshot,
-            replacement: correctedText,
-            expectedText: updatedText,
-            expectedRange: updatedCapturedRange
-        ) {
-            moveCaret(
-                in: snapshot.element,
-                to: snapshot.context.utf16Location + (correctedText as NSString).length
-            )
-            return
+        if let spanWrite = plan.spanWrite,
+           try await replaceWithKeyboardInput(spanWrite, in: snapshot) {
+            moveCaret(in: snapshot.element, to: caretDestination)
+            return .applied(.keyboard)
         }
 
         if capturedSourceIsUnchanged(snapshot) {
@@ -1021,56 +1138,262 @@ final class AccessibilityTextClient {
         throw AccessibilityTextError.replacementFailed
     }
 
+    private func record(
+        receiptFor plan: TextReplacementPlan,
+        snapshot: FocusedTextSnapshot,
+        startedAt: Date,
+        outcome: TextApplyReceipt.Outcome
+    ) {
+        guard let applyReceiptHandler else { return }
+        applyReceiptHandler(
+            TextApplyReceipt(
+                startedAt: startedAt,
+                completedAt: Date(),
+                applicationName: snapshot.applicationName,
+                targetKind: snapshot.context.targetKind.rawValue,
+                targetUTF16Length: snapshot.context.utf16Length,
+                changedRange: plan.spanWrite?.documentRange
+                    ?? NSRange(location: snapshot.context.utf16Location, length: 0),
+                plannedWrites: plan.writes.count,
+                isWebArea: isInsideWebArea(snapshot.element),
+                outcome: outcome
+            )
+        )
+    }
+
     private func replaceSelectedText(
-        in element: AXUIElement,
-        range: NSRange,
-        originalText: String,
-        with replacement: String,
-        expectedText: String,
-        expectedRange: NSRange
-    ) async throws -> Bool {
+        _ write: PlannedTextWrite,
+        in element: AXUIElement
+    ) async throws -> TextReplacementRunner.WriteResult {
         guard isAttributeSettable(kAXSelectedTextRangeAttribute, on: element),
               isAttributeSettable(kAXSelectedTextAttribute, on: element),
+              hostHolds(write.neighbourhood, in: write.neighbourhoodRange, of: element),
               try await selectText(
-                range,
-                originalText: originalText,
+                write.documentRange,
+                originalText: write.originalText,
                 in: element
               ) else {
-            return false
+            return .refused
         }
 
         let result = AXUIElementSetAttributeValue(
             element,
             kAXSelectedTextAttribute as CFString,
-            replacement as CFString
+            write.replacement as CFString
         )
-        guard result == .success else { return false }
-        return try await waitForCapturedText(
-            expectedText,
-            range: expectedRange,
+        guard result == .success else { return .refused }
+        if try await waitForCapturedText(
+            write.expectedCapturedText,
+            range: write.expectedCapturedRange,
             in: element,
             attempts: 12
+        ) {
+            return .applied
+        }
+
+        // The whole captured text does not read as it should. That is not the same as
+        // the write having failed: a host that changed something the plan never touched
+        // fails this check while doing exactly what it was asked. So the write itself is
+        // asked about separately, in its own surroundings.
+        if try await waitForHost(
+            toHold: write.appliedNeighbourhood,
+            in: write.appliedNeighbourhoodRange,
+            of: element,
+            attempts: 6
+        ) {
+            return .applied
+        }
+        // Untouched surroundings mean nothing landed, and the writes before this one can
+        // safely be put back. Anything else means the document is holding something
+        // nobody planned, and the only safe move is to stop.
+        return hostHolds(write.neighbourhood, in: write.neighbourhoodRange, of: element)
+            ? .refused
+            : .unverified
+    }
+
+    /// Whether the host is holding the writing the plan expects, at the offsets the plan
+    /// expects it, read through the attribute that selection offsets belong to.
+    ///
+    /// This is the question the rest of the apply path cannot ask. A snapshot is read
+    /// once, mostly from `AXValue`, and every offset after that is arithmetic on the
+    /// string it returned. `AXValue` and `AXStringForRange` are two different attributes
+    /// though, and a host is free to index them differently: an editor that renders an
+    /// inline object as its label in one and as a single character in the other reports
+    /// the same writing at offsets that drift apart after it. The plan then addresses the
+    /// right sentence in the wrong place, and because a narrowed write covers a word or
+    /// two, the selection it makes there can be holding exactly what the plan expected
+    /// and be nowhere near the author's typo.
+    ///
+    /// Forty characters either side is enough writing to settle it. A host that answers
+    /// nothing at all is one that publishes no range-parameterized text, which is every
+    /// host that indexes one way and has nothing to reconcile, so silence is agreement.
+    private func hostHolds(
+        _ expected: String,
+        in range: NSRange,
+        of element: AXUIElement
+    ) -> Bool {
+        disagreement(about: expected, in: range, of: element) == nil
+    }
+
+    /// How a host's own reading of a range differs from the plan's, said in a way that
+    /// can be written into a receipt without writing down what the author is saying.
+    ///
+    /// How far the two agree before they part is the useful number. Nought means the
+    /// offsets address different writing altogether, which is a host indexing its value
+    /// and its ranges differently. A large number with a different length means the text
+    /// moved while this was being decided.
+    private func disagreement(
+        about expected: String,
+        in range: NSRange,
+        of element: AXUIElement
+    ) -> String? {
+        guard range.length > 0,
+              let hostText = stringForRange(range, in: element),
+              !WriteConfirmation.matches(hostText, expected) else {
+            return nil
+        }
+        let host = WriteConfirmation.comparable(hostText)
+        let planned = WriteConfirmation.comparable(expected)
+        let agreed = zip(host, planned).prefix { $0 == $1 }.count
+        let detail = """
+            the application reads \((hostText as NSString).length) characters at \
+            \(range.location)–\(NSMaxRange(range)) where the plan measured \
+            \((expected as NSString).length), agreeing on the first \(agreed)
+            """
+        logger.debug("Host disagrees: \(detail, privacy: .public)")
+        return detail
+    }
+
+    private func waitForHost(
+        toHold expected: String,
+        in range: NSRange,
+        of element: AXUIElement,
+        attempts: Int
+    ) async throws -> Bool {
+        for attempt in 0..<attempts {
+            try Task.checkCancellation()
+            if let hostText = stringForRange(range, in: element),
+               WriteConfirmation.matches(hostText, expected) {
+                return true
+            }
+            if attempt < attempts - 1 {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        return false
+    }
+
+    /// How far the host's own offsets sit from the ones the correction was planned
+    /// against, or `nil` when that cannot be settled.
+    ///
+    /// A host that indexes its value one way and its ranges another reports the same
+    /// writing at numbers that have drifted apart, and every offset taken from the value
+    /// then addresses text somewhere else. The drift is a distance, though, and a
+    /// distance can be measured: read a stretch of the host's own text around where the
+    /// target should be, and look for the target in it. Found once, the plan moves by
+    /// that far and the writes go where the author's writing actually is. Found twice, or
+    /// not at all, there is nothing here anyone can be sure of, and being sure is the
+    /// whole job.
+    private func hostOffsetDelta(for snapshot: FocusedTextSnapshot) -> Int? {
+        let target = snapshot.context.range
+        guard target.length > 0 else { return nil }
+
+        let start = max(0, target.location - maximumOffsetSearchRadius)
+        // Reaching past the end of the document is how a host that numbers its text
+        // higher than its value does gets found at all, and it is also a read some hosts
+        // will not answer. So the generous window is asked for first and the one bounded
+        // by what the value said is the fallback.
+        let ends = [
+            NSMaxRange(target) + maximumOffsetSearchRadius,
+            snapshot.documentUTF16Length
+        ]
+        for end in ends {
+            let window = NSRange(location: start, length: max(0, end - start))
+            guard window.length > target.length,
+                  let delta = offsetDelta(
+                    ofTarget: snapshot.context.text,
+                    at: target,
+                    searchedIn: window,
+                    of: snapshot.element
+                  ) else {
+                continue
+            }
+            return delta
+        }
+        return nil
+    }
+
+    /// Where the target sits inside one stretch of the host's own text, as a distance
+    /// from where the plan put it. `nil` unless it is in there exactly once.
+    private func offsetDelta(
+        ofTarget target: String,
+        at range: NSRange,
+        searchedIn window: NSRange,
+        of element: AXUIElement
+    ) -> Int? {
+        guard let hostWindow = stringForRange(window, in: element),
+              (hostWindow as NSString).length == window.length else {
+            return nil
+        }
+
+        // Compared in the form the two readings share, which substitutes one space for
+        // another and never one character for two, so a match here is a match of the
+        // same length at the same place.
+        let haystack = WriteConfirmation.comparable(hostWindow) as NSString
+        let needle = WriteConfirmation.comparable(target)
+        let match = haystack.range(of: needle)
+        guard match.location != NSNotFound else { return nil }
+        let remainder = NSRange(
+            location: match.location + 1,
+            length: haystack.length - match.location - 1
+        )
+        guard haystack.range(of: needle, range: remainder).location == NSNotFound else {
+            return nil
+        }
+        return window.location + match.location - range.location
+    }
+
+    /// Whether the host reads the target back at the offsets the correction was planned
+    /// against. One question, asked once, before any of the writing starts.
+    private func targetDisagreement(_ snapshot: FocusedTextSnapshot) -> String? {
+        disagreement(
+            about: snapshot.context.text,
+            in: snapshot.context.range,
+            of: snapshot.element
         )
     }
 
     private func replaceWithKeyboardInput(
-        _ snapshot: FocusedTextSnapshot,
-        replacement: String,
-        expectedText: String,
-        expectedRange: NSRange
+        _ write: PlannedTextWrite,
+        in snapshot: FocusedTextSnapshot
     ) async throws -> Bool {
+        let range = write.documentRange
+        let originalText = write.originalText
+        let replacement = write.replacement
+        // Typing is the one strategy that cannot carry a line break. A line feed sent as
+        // text is inserted as a character, which a web editor collapses, and the key
+        // that would do it properly is Return, which in a great many composers does not
+        // insert anything at all: it sends the message. Refusing here costs a rare
+        // correction in a host that took none of the earlier strategies either. The
+        // alternative risks sending half of somebody's email.
+        guard !replacement.contains(where: \.isNewline) else { return false }
+
         focus(snapshot.element)
-        guard try await selectText(
-            snapshot.context.range,
-            originalText: snapshot.context.text,
+        guard hostHolds(
+            write.neighbourhood,
+            in: write.neighbourhoodRange,
+            of: snapshot.element
+        ), try await selectText(
+            range,
+            originalText: originalText,
             in: snapshot.element
         ), postKeyboardInput(replacement, to: snapshot.processIdentifier) else {
             return false
         }
 
         return try await waitForCapturedText(
-            expectedText,
-            range: expectedRange,
+            write.expectedCapturedText,
+            range: write.expectedCapturedRange,
             in: snapshot.element,
             attempts: 24
         )
@@ -1088,7 +1411,10 @@ final class AccessibilityTextClient {
             if let selectedRange = selectedRange(of: element),
                selectedRange.location == range.location,
                selectedRange.length == range.length,
-               (stringAttribute(kAXSelectedTextAttribute, from: element) ?? "") == originalText {
+               selectionConfirms(
+                stringAttribute(kAXSelectedTextAttribute, from: element),
+                as: originalText
+               ) {
                 return true
             }
             if attempt < 7 {
@@ -1096,6 +1422,25 @@ final class AccessibilityTextClient {
             }
         }
         return false
+    }
+
+    /// Whether a host's answer about its own selection confirms what the write expects
+    /// to find there.
+    ///
+    /// A host that says nothing has confirmed nothing, and that used to read as
+    /// agreement: the answer was compared as `?? ""`, so a write covering no characters
+    /// was confirmed by silence, and a write covering no characters is every correction
+    /// that only adds something. A write that does cover characters now has to be
+    /// answered, and answered with them.
+    ///
+    /// A write that covers nothing is left with the weaker test on purpose. There is
+    /// somewhere it has to be, and nothing there to be holding: what puts it in the right
+    /// place is the agreement about the writing around it, which was settled before the
+    /// selection was made.
+    private func selectionConfirms(_ selectedText: String?, as expected: String) -> Bool {
+        guard !expected.isEmpty else { return (selectedText ?? "").isEmpty }
+        guard let selectedText else { return false }
+        return WriteConfirmation.matches(selectedText, expected)
     }
 
     private func waitForCapturedText(
@@ -1424,6 +1769,26 @@ final class AccessibilityTextClient {
                 return false
             }
             if role == kAXToolbarRole as String {
+                return true
+            }
+            currentElement = elementAttribute(kAXParentAttribute, from: candidate)
+        }
+
+        return false
+    }
+
+    /// Whether a field is part of a web page, and so a document whose formatting the
+    /// page owns rather than a text field holding characters.
+    ///
+    /// Asked of the semantic hierarchy for the same reason as `isInsideToolbar`: every
+    /// browser and every Electron application publishes an AXWebArea above its content,
+    /// and none of them need to be named for it to be recognised.
+    private func isInsideWebArea(_ element: AXUIElement) -> Bool {
+        var currentElement: AXUIElement? = element
+
+        for _ in 0..<20 {
+            guard let candidate = currentElement else { return false }
+            if stringAttribute(kAXRoleAttribute, from: candidate) == "AXWebArea" {
                 return true
             }
             currentElement = elementAttribute(kAXParentAttribute, from: candidate)

@@ -62,8 +62,6 @@ enum PlainwordTheme {
     static let fieldSurface = adaptive(light: 0xF1EBDE, dark: 0x1E1A14)
     /// The sidebar is the same raised paper as any other lifted surface.
     static let sidebar = raisedSurface
-    static let hoverSurface = raisedSurface
-    static let disabledSurface = fieldSurface
     static let selectionWash = adaptive(light: 0xE8E2D2, dark: 0x332D23)
     static let selectedSurface = selectionWash
 
@@ -78,8 +76,6 @@ enum PlainwordTheme {
     static let accentStrong = adaptive(light: 0x27543D, dark: 0xA5CFB2)
     static let accentMuted = adaptive(light: 0xE3EBE0, dark: 0x2C3A2F)
     static let accentText = adaptive(light: 0xF7F4EA, dark: 0x161B15)
-    static let primaryButton = accent
-    static let primaryButtonText = accentText
 
     /// Nothing in this system is "success green" separately from the accent: a
     /// verified connection and an applied edit are the same green ink.

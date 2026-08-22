@@ -282,6 +282,22 @@ public actor CodexAppServerClient {
     private var startupTask: Task<Void, Error>?
     private var standardOutputBuffer = Data()
     private var standardErrorBuffer = Data()
+    /// The one reader of each stream, and the handle that feeds it.
+    ///
+    /// A pipe hands over whatever bytes have arrived, in chunks it chooses, and those
+    /// chunks only mean anything in the order they were written. Starting a separate
+    /// task per chunk, as this used to, hands that order to the scheduler: two chunks
+    /// can reach the actor the wrong way round, which glues one delta onto the middle of
+    /// another and, when a chunk boundary falls inside a line, turns that line into
+    /// something that will not parse. A dropped line is a dropped message, and a dropped
+    /// message can be the one carrying the answer, leaving the turn to time out.
+    ///
+    /// A stream keeps the order. Yielding into it is synchronous, so the pipe's own
+    /// callback establishes the sequence, and one consumer takes them one at a time.
+    private var standardOutputChunks: AsyncStream<Data>.Continuation?
+    private var standardErrorChunks: AsyncStream<Data>.Continuation?
+    private var standardOutputReader: Task<Void, Never>?
+    private var standardErrorReader: Task<Void, Never>?
     private var nextRequestID = 1
     private var pendingRequests: [Int: PendingRequest] = [:]
     private var activeTurns: [String: ActiveTurn] = [:]
@@ -740,19 +756,23 @@ public actor CodexAppServerClient {
         process.standardError = errorPipe
         process.currentDirectoryURL = FileManager.default.temporaryDirectory
 
-        outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        // The handlers only put chunks in the queue, in the order the pipe delivered
+        // them. Reading them is one job each, below, so nothing can overtake.
+        let (outputChunks, outputContinuation) = AsyncStream<Data>.makeStream(
+            bufferingPolicy: .unbounded
+        )
+        let (errorChunks, errorContinuation) = AsyncStream<Data>.makeStream(
+            bufferingPolicy: .unbounded
+        )
+        outputPipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
-            Task { [weak self] in
-                await self?.receiveStandardOutput(data, processID: processID)
-            }
+            outputContinuation.yield(data)
         }
-        errorPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        errorPipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
-            Task { [weak self] in
-                await self?.receiveStandardError(data, processID: processID)
-            }
+            errorContinuation.yield(data)
         }
         process.terminationHandler = { [weak self] process in
             let status = process.terminationStatus
@@ -770,6 +790,18 @@ public actor CodexAppServerClient {
         )
         standardOutputBuffer.removeAll(keepingCapacity: true)
         standardErrorBuffer.removeAll(keepingCapacity: true)
+        standardOutputChunks = outputContinuation
+        standardErrorChunks = errorContinuation
+        standardOutputReader = Task { [weak self] in
+            for await data in outputChunks {
+                await self?.receiveStandardOutput(data, processID: processID)
+            }
+        }
+        standardErrorReader = Task { [weak self] in
+            for await data in errorChunks {
+                await self?.receiveStandardError(data, processID: processID)
+            }
+        }
         executableURL = resolvedURL
 
         do {
@@ -1056,6 +1088,7 @@ public actor CodexAppServerClient {
         runningProcess = nil
         isInitialized = false
         configuredMCPServerNames = []
+        stopReadingStreams()
         failAll(with: error)
     }
 
@@ -1109,6 +1142,22 @@ public actor CodexAppServerClient {
         isInitialized = false
         startupTask = nil
         configuredMCPServerNames = []
+        stopReadingStreams()
+    }
+
+    /// Closes the queues and lets their readers finish what is already in them.
+    ///
+    /// Finished rather than cancelled: the chunks already queued are output this process
+    /// produced before it went away, and the reader discards anything belonging to a
+    /// process that is no longer the current one anyway. Cancelling would only race the
+    /// draining for nothing.
+    private func stopReadingStreams() {
+        standardOutputChunks?.finish()
+        standardErrorChunks?.finish()
+        standardOutputChunks = nil
+        standardErrorChunks = nil
+        standardOutputReader = nil
+        standardErrorReader = nil
     }
 
     private var standardErrorDescription: String? {

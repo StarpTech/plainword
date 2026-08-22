@@ -301,6 +301,103 @@ final class CodexAppServerClientTests: XCTestCase {
         XCTAssertEqual(correction.classification, .correction)
     }
 
+    /// A turn's output arrives in as many pieces as the pipe cares to deliver it in, and
+    /// every one of them has to be read, once, in the order it was written.
+    ///
+    /// This drives forty deltas through in quick succession, which is enough that the
+    /// reader is woken repeatedly mid-turn rather than handed the whole turn at once.
+    ///
+    /// It is not a reproduction of the reordering this was written alongside: that one
+    /// needs the machine under load and shows up a few times in fifty runs of the whole
+    /// suite, never on its own. What it does hold down is the part the fix could break —
+    /// chunks queued behind a reader that stops early, or is torn down mid-turn, would
+    /// come out short here.
+    func testStreamedOutputIsAssembledInTheOrderItWasWritten() async throws {
+        let deltaCount = 40
+        let launchLog = temporaryDirectory.appendingPathComponent("chunked.log")
+        let executable = try makeChunkedFakeCodex(
+            launchLog: launchLog,
+            deltaCount: deltaCount
+        )
+        let recorder = CodexDebugEventRecorder()
+        let client = CodexAppServerClient(
+            executableURL: executable,
+            requestTimeout: 2,
+            debugHandler: { event in
+                await recorder.record(event)
+            }
+        )
+
+        _ = try await client.correct(
+            text: "This is an connection test.",
+            profile: WritingProfile(),
+            locale: "en-US",
+            settings: LLMSettings(provider: .codex, codexModel: "test-model")
+        )
+
+        let events = await recorder.events
+        let assembled = events.compactMap { event -> String? in
+            guard case let .reasoning(_, delta) = event else { return nil }
+            return delta
+        }.joined()
+        XCTAssertEqual(
+            assembled,
+            (0..<deltaCount).map { "[\($0)]" }.joined()
+        )
+    }
+
+    /// A fake that answers like the one above, but writes its thinking one small piece
+    /// at a time, each its own write to the pipe.
+    private func makeChunkedFakeCodex(launchLog: URL, deltaCount: Int) throws -> URL {
+        let executable = temporaryDirectory.appendingPathComponent("codex-chunked")
+        let script = """
+        #!/bin/sh
+        echo launch >> '\(launchLog.path)'
+        while IFS= read -r line; do
+          request_id=$(printf '%s' "$line" | sed -E 's/.*"id":([0-9]+).*/\\1/')
+          case "$line" in
+            *'"method":"initialize"'*)
+              printf '{"id":%s,"result":{}}\\n' "$request_id"
+              ;;
+            *'"method":"config/read"'*)
+              printf '{"id":%s,"result":{"config":{"mcp_servers":{}},"origins":{}}}\\n' "$request_id"
+              ;;
+            *'"method":"account/read"'*)
+              printf '{"id":%s,"result":{"account":{"type":"chatgpt","email":"writer@example.com","planType":"plus"},"requiresOpenaiAuth":true}}\\n' "$request_id"
+              ;;
+            *'"method":"model/list"'*)
+              printf '{"id":%s,"result":{"data":[{"id":"test-model","model":"test-model","displayName":"Test Model","isDefault":true}],"nextCursor":null}}\\n' "$request_id"
+              ;;
+            *'"method":"thread/start"'*)
+              printf '{"id":%s,"result":{"thread":{"id":"thread-1"}}}\\n' "$request_id"
+              ;;
+            *'"method":"turn/start"'*)
+              printf '{"id":%s,"result":{"turn":{"id":"turn-1"}}}\\n' "$request_id"
+              i=0
+              while [ $i -lt \(deltaCount) ]; do
+                printf '{"method":"item/reasoning/summaryTextDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"item-0","delta":"[%s]"}}\\n' "$i"
+                i=$((i+1))
+              done
+              printf '%s\\n' '{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":1,"item":{"id":"item-1","type":"agentMessage","text":"{\\"corrected_text\\":\\"This is a connection test.\\",\\"classification\\":\\"correction\\"}","phase":"final_answer"}}}'
+              printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed","items":[]}}}'
+              ;;
+            *'"method":"thread/unsubscribe"'*)
+              printf '{"id":%s,"result":{}}\\n' "$request_id"
+              ;;
+            *'"method":"turn/interrupt"'*)
+              printf '{"id":%s,"result":{}}\\n' "$request_id"
+              ;;
+          esac
+        done
+        """
+        try script.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: executable.path
+        )
+        return executable
+    }
+
     private func makeFakeCodex(launchLog: URL) throws -> URL {
         let executable = temporaryDirectory.appendingPathComponent("codex")
         let script = """

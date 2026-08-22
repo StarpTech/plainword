@@ -62,6 +62,8 @@ struct LLMDebugSettingsView: View {
                         }
                     }
                 }
+
+                appliesSection
             }
         }
         .sheet(isPresented: isInspecting) {
@@ -73,6 +75,45 @@ struct LLMDebugSettingsView: View {
                 clearedCallNotice
             }
         }
+    }
+
+    /// What was written into other applications, which is the half of the work the
+    /// debug view could not show until now.
+    ///
+    /// Its own list rather than a line under each call: an apply does not always follow
+    /// a call, since a suggestion the author has seen before is served from the cache
+    /// and never reaches a provider at all.
+    @ViewBuilder
+    private var appliesSection: some View {
+        if !visibleApplies.isEmpty {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 10) {
+                    SettingsSectionLabel("Applies")
+                    Spacer(minLength: 8)
+                    Text(applyCountLabel)
+                        .font(PlainwordFont.ui(11))
+                        .foregroundStyle(PlainwordTheme.textSecondary)
+                }
+                .padding(.top, 6)
+
+                LazyVStack(spacing: 9) {
+                    ForEach(visibleApplies) { receipt in
+                        TextApplyRow(receipt: receipt)
+                    }
+                }
+            }
+        }
+    }
+
+    private var visibleApplies: [TextApplyReceipt] {
+        scope == .failures
+            ? logStore.applies.filter(\.isFailure)
+            : logStore.applies
+    }
+
+    private var applyCountLabel: String {
+        let count = visibleApplies.count
+        return count == 1 ? "1 apply" : "\(count) applies"
     }
 
     private var listHeader: some View {
@@ -101,8 +142,8 @@ struct LLMDebugSettingsView: View {
                 inspectedCallID = nil
             }
             .buttonStyle(PlainwordButtonStyle(.quiet))
-            .disabled(logStore.entries.isEmpty)
-            .hoverTip("Remove every recorded call from this session")
+            .disabled(logStore.entries.isEmpty && logStore.applies.isEmpty)
+            .hoverTip("Remove every recorded call and apply from this session")
         }
     }
 
@@ -353,5 +394,63 @@ private struct LLMCallRow: View {
             parts.append("Text: " + subject)
         }
         return parts.filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+}
+
+/// One apply: where it went, how much of the field it was allowed to touch, and how it
+/// ended. Not openable, because there is nothing behind it that this line leaves out.
+private struct TextApplyRow: View {
+    let receipt: TextApplyReceipt
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                Text(receipt.applicationName)
+                    .font(PlainwordFont.ui(13, weight: .bold))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(receipt.completedAt, format: .dateTime.hour().minute().second())
+                    .font(PlainwordFont.mono(10))
+                    .foregroundStyle(PlainwordTheme.textSecondary)
+            }
+
+            Text(receipt.summary)
+                .font(PlainwordFont.ui(11))
+                .foregroundStyle(
+                    receipt.isFailure ? PlainwordTheme.danger : PlainwordTheme.textTertiary
+                )
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 13)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .plainwordCard(
+            cornerRadius: PlainwordTheme.cardCornerRadius,
+            fill: PlainwordTheme.surface,
+            border: PlainwordTheme.separator
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(receipt.applicationName): \(receipt.summary)")
+        .hoverTip(hoverDetail)
+    }
+
+    /// The share of the target the writes covered, which is the number that says whether
+    /// a correction stayed out of the rest of the message.
+    private var hoverDetail: String {
+        let share = Int((receipt.changedShare * 100).rounded())
+        return """
+        \(receipt.outcomeDescription.capitalizedFirst)
+        Touched \(receipt.changedRange.length) of \(receipt.targetUTF16Length) characters (\(share)%)
+        Took \(Int((receipt.duration * 1_000).rounded())) ms
+        """
+    }
+}
+
+private extension String {
+    var capitalizedFirst: String {
+        guard let first else { return self }
+        return first.uppercased() + dropFirst()
     }
 }

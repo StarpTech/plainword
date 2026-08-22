@@ -152,7 +152,20 @@ public enum TextEditContextExtractor {
                 targetKind = .paragraph
             case .document:
                 guard source.length <= maximumUTF16Length else { return nil }
-                requestedRange = NSRange(location: 0, length: source.length)
+                // A signature is not the author's writing for this message, and it is
+                // the part of a field least able to survive being rewritten: what holds
+                // its links, weight, and layout belongs to the mail client, and a write
+                // carries none of that back. Left out of the target it stays exactly as
+                // it is, and still travels as read-only context, so the model can read
+                // who is writing without being asked to edit it.
+                //
+                // Unless that is where the author is working. A caret inside the
+                // signature says the signature is what is being written.
+                let signature = SignatureBoundary.location(in: fullText)
+                let end = signature.map { boundary in
+                    selectedRange.location >= boundary ? source.length : boundary
+                } ?? source.length
+                requestedRange = NSRange(location: 0, length: end)
                 targetKind = .document
             }
             candidate = boundedRange(

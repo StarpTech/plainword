@@ -196,6 +196,12 @@ final class CrossAppCorrectionController: ObservableObject {
         )
         isListeningEnabled = defaults.object(forKey: "assistantListeningEnabled") as? Bool ?? true
         observeContextEnrichmentSetting()
+        // What was written into somebody else's document, recorded beside the calls that
+        // proposed it. The debug view is where an author looks after a suggestion lands
+        // badly, and until now it could only show them the half that went over the wire.
+        accessibility.applyReceiptHandler = { [weak settings] receipt in
+            settings?.llmDebugLog.record(receipt)
+        }
     }
 
     /// Follows the setting so that changing it takes hold everywhere at once.

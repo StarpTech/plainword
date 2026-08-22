@@ -35,15 +35,29 @@ struct LLMDebugLogEntry: Identifiable {
 @MainActor
 final class LLMDebugLogStore: ObservableObject {
     @Published private(set) var entries: [LLMDebugLogEntry] = []
+    /// What was written into other applications, newest first. Kept beside the calls
+    /// rather than inside them: an apply does not always follow a call, since a repeated
+    /// suggestion is served from the cache, and it is the half of the work that touches
+    /// the author's document.
+    @Published private(set) var applies: [TextApplyReceipt] = []
 
     private let maximumEntryCount: Int
+    private let maximumApplyCount: Int
 
     /// Thinking can run longer than the answer several times over, and a hundred calls
     /// are held in memory at once, so it is kept to the same ceiling as a response body.
     private static let maximumReasoningCharacterCount = 65_536
 
-    init(maximumEntryCount: Int = 100) {
+    init(maximumEntryCount: Int = 100, maximumApplyCount: Int = 100) {
         self.maximumEntryCount = maximumEntryCount
+        self.maximumApplyCount = maximumApplyCount
+    }
+
+    func record(_ receipt: TextApplyReceipt) {
+        applies.insert(receipt, at: 0)
+        if applies.count > maximumApplyCount {
+            applies.removeLast(applies.count - maximumApplyCount)
+        }
     }
 
     func record(_ event: LLMCallDebugEvent) {
@@ -99,5 +113,6 @@ final class LLMDebugLogStore: ObservableObject {
 
     func clear() {
         entries.removeAll()
+        applies.removeAll()
     }
 }

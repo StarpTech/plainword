@@ -31,7 +31,6 @@ private enum ContextReceiptMetrics {
     static let verticalPadding: CGFloat = 10
     static let rowHeight: CGFloat = 22
     static let rowSpacing: CGFloat = 3
-    static let captionHeight: CGFloat = 14
     static let controlRowHeight: CGFloat = 22
     static let actionRowHeight: CGFloat = 26
     static let sectionSpacing: CGFloat = 7
@@ -880,12 +879,6 @@ final class CorrectionPanelController {
         } else {
             scheduleStreamingResize()
         }
-    }
-
-    func showReady(_ text: String) {
-        cancelScheduledStreamingResize()
-        model.transition(to: .ready, correctedText: text)
-        resizeForContent(animated: true)
     }
 
     func showUnchanged() {
